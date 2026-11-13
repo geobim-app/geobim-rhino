@@ -58,6 +58,12 @@ namespace GeoBimRhino
             if (!resp.IsSuccessStatusCode)
             {
                 var msg = json.ValueKind == JsonValueKind.Object && json.TryGetProperty("error", out var err) ? err.GetString() : null;
+                var host = resp.RequestMessage?.RequestUri?.Host ?? "this server";
+                // A server without plugin token support reads gbp_… as a Firebase sign-in
+                if (resp.StatusCode == HttpStatusCode.Unauthorized && msg == "Invalid or expired sign-in")
+                    msg = $"{host} does not accept plugin tokens yet — in GeoBIMSettings choose the server where you created the token (e.g. Beta)";
+                else if (resp.StatusCode == HttpStatusCode.Unauthorized && msg == "Invalid or revoked plugin token")
+                    msg = $"the token is unknown on {host} or was revoked — tokens work only on the site that created them; create one there under Account → Rhino plugin";
                 throw new ApiException(resp.StatusCode, msg ?? $"HTTP {(int)resp.StatusCode}");
             }
             return json;

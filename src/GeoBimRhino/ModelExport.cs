@@ -23,6 +23,7 @@ namespace GeoBimRhino
         public long Triangles;
         public string GeoRefInfo = "";
         public string Epsg;          // EPSG code written into IfcMapConversion, else null
+        public bool Cancelled;       // the user cancelled the CRS question
     }
 
     /// <summary>
@@ -30,17 +31,14 @@ namespace GeoBimRhino
     /// instances: one per component, with the instance transform), geometry as
     /// render meshes in metres, relative to an origin chosen by the
     /// georeferencing so float vertices keep millimetres:
-    ///  1. map coordinates (|x| &gt; 100 km or |y| &gt; 1000 km): IfcMapConversion,
-    ///     EPSG from the setting or detected (zone prefix 32/33 → 4647/5650,
-    ///     7 digits 2–5 Mio → Gauss-Krüger 31466–31469, else the default UTM code);
+    ///  1. map coordinates (|x| or |y| &gt; 100 km): IfcMapConversion, EPSG from
+    ///     the caller (setting, document choice, CrsDetect, or asked);
     ///  2. EarthAnchorPoint set: IfcSite RefLatitude/RefLongitude/RefElevation,
     ///     model base point as origin, model north as TrueNorth;
     ///  3. otherwise none: geoBIM.app drops the model at the centre of the view.
     /// </summary>
     public static class ModelExport
     {
-        const double MapThresholdX = 100000, MapThresholdY = 1000000;
-
         class Item
         {
             public RhinoObject Source;      // top-level object (or the instance for components)
@@ -52,7 +50,8 @@ namespace GeoBimRhino
             public System.Drawing.Color ParentColor;
         }
 
-        public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, string epsgSetting, int defaultUtmEpsg)
+        /// <param name="resolveEpsg">EPSG for map coordinates (easting, northing of the model centre in metres); null cancels</param>
+        public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, Func<double, double, int?> resolveEpsg)
         {
             var res = new ExportResult();
             var model = new IfcModelData
@@ -78,9 +77,11 @@ namespace GeoBimRhino
             // ---- Georeferencing → origin (model units) ----
             Point3d origin;
             var anchor = doc.EarthAnchorPoint;
-            if (Math.Abs(cx) > MapThresholdX || Math.Abs(cy) > MapThresholdY)
+            if (CrsDetect.LooksLikeMap(cx, cy))
             {
-                int epsg = DetectEpsg(cx, epsgSetting, defaultUtmEpsg);
+                int? chosen = resolveEpsg(cx, cy);
+                if (chosen == null) { res.Cancelled = true; return res; }
+                int epsg = chosen.Value;
                 double ox = Math.Round(cx / 1000.0) * 1000.0, oy = Math.Round(cy / 1000.0) * 1000.0;
                 origin = new Point3d(ox / scale, oy / scale, 0);
                 model.GeoRef = GeoRefKind.MapConversion;
@@ -122,28 +123,6 @@ namespace GeoBimRhino
                 res.Triangles += e.Mesh.Triangles.Count / 3;
             }
             return res;
-        }
-
-        /// <summary>EPSG for map coordinates: the setting, else detected from the easting</summary>
-        public static int DetectEpsg(double easting, string setting, int defaultUtm)
-        {
-            if (!string.IsNullOrWhiteSpace(setting) && !setting.Equals("auto", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(setting.Replace("EPSG:", "").Trim(), out int fixedCode))
-                return fixedCode;
-            double e = Math.Abs(easting);
-            if (e >= 10000000)
-            {
-                int zone = (int)Math.Floor(e / 1000000);
-                if (zone == 32) return 4647;   // ETRS89 / UTM zone 32N (zE-N)
-                if (zone == 33) return 5650;   // ETRS89 / UTM zone 33N (zE-N)
-                return defaultUtm;
-            }
-            if (e >= 1000000)
-            {
-                int gk = (int)Math.Floor(e / 1000000);
-                if (gk >= 2 && gk <= 5) return 31464 + gk;   // DHDN / 3-degree Gauss-Krüger zone 2–5
-            }
-            return defaultUtm;
         }
 
         static void Collect(RhinoDoc doc, RhinoObject top, RhinoObject obj, Transform xf, string block,

@@ -7,7 +7,7 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <AssemblyName>GeoBimRhino</AssemblyName>
     <RootNamespace>GeoBimRhino</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Company>geoBIM.app</Company>
     <Product>geoBIM.app for Rhino</Product>
     <Description>Uploads Rhino models to geoBIM.app (IFC 4 → geobim-tiler → 3D Tiles)</Description>
@@ -24,6 +24,12 @@
 
   <ItemGroup>
     <PackageReference Include="RhinoCommon" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Toolbar next to the .rhp: Rhino opens a .rui with the plugin's name on its first load
+         (built by tools/make_rui.py from Resources/toolbar-*.png) -->
+    <None Include="GeoBimRhino.rui" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -13,7 +13,8 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 
 1. Build (see below) or take `GeoBimRhino.rhp` from a release.
 2. Drag `GeoBimRhino.rhp` into the Rhino window (or *Tools → Options → Plug-ins → Install…*).
-   It loads at startup from then on.
+   It loads at startup from then on and opens the **geoBIM.app toolbar** (`GeoBimRhino.rui` next to
+   the `.rhp`); `GeoBIMToolbar` shows it again.
 
 ## Set up (once)
 
@@ -32,6 +33,7 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 | `GeoBIMExportIfc` | Writes the IFC only (`-GeoBIMExportIfc` takes the file name on the command line, for scripts). |
 | `GeoBIMOpen` | Opens the document's model (or the server) in the browser. |
 | `GeoBIMSettings` | Server, token, EPSG, connection test. |
+| `GeoBIMToolbar` | Shows the geoBIM.app toolbar (Upload, Open, Export IFC, Settings). |
 
 ## What ends up in the IFC
 
@@ -51,11 +53,19 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 
 ## Georeferencing (automatic)
 
-1. **Map coordinates** — model centre beyond 100 km in x or 1000 km in y: geometry relative to a
+1. **Map coordinates** — model centre more than 100 km from the origin: geometry relative to a
    rounded origin (keeps millimetres), `IfcMapConversion` + `IfcProjectedCRS "EPSG:<code>"`.
-   EPSG `auto`: zone prefix 32/33 (8-digit eastings) → 4647/5650, 7-digit eastings 2–5 Mio →
-   Gauss-Krüger 31466–31469, otherwise *DefaultUTM*. Heights are taken as orthometric (NHN);
-   the tiler lifts them with GCG2016 / EGM2008.
+   With EPSG `auto` the plugin recognises:
+   - UTM with zone prefix (8-digit eastings, e.g. 32 373 064) → 4647 / 5650 / 5649
+   - Swiss LV95 (E 2.4–2.9 Mio, N 1.0–1.4 Mio) → 2056
+   - German Gauß-Krüger with zone prefix (E 2–5 Mio, N 5–6 Mio) → 31466–31469
+   - UTM without zone prefix → *DefaultUTM* (25832; set 25833 for eastern Germany / Austria)
+
+   Swiss LV03 and the Austrian systems (MGI Gauß-Krüger West/Central/East, BMN M28/M31/M34,
+   Lambert MGI / ETRS89) overlap in their coordinate ranges: the plugin then asks once, offering
+   only the plausible ones, and remembers the choice in the document (reset it with
+   `GeoBIMSettings → EPSG`). Heights are taken as orthometric; the tiler lifts them with GCG2016
+   (Germany) or EGM2008 (elsewhere).
 2. **EarthAnchorPoint** set (*Location* in Rhino): `IfcSite` RefLatitude/RefLongitude/RefElevation
    at the model base point, model north as `TrueNorth`.
 3. **Neither**: geoBIM.app drops the model in the centre of the view; move it with the gizmo and

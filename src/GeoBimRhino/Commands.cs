@@ -80,10 +80,48 @@ namespace GeoBimRhino
 
         public static void Ui(Action a) => RhinoApp.InvokeOnUiThread(a);
 
-        public static ExportResult Export(RhinoDoc doc, List<RhinoObject> objects, string name, string path)
+        public const string DocEpsgKey = "epsg";
+
+        /// <summary>
+        /// EPSG for a model in map coordinates: the fixed setting, else this document's
+        /// earlier choice, else CrsDetect; when that is ambiguous (Swiss LV03, Austrian
+        /// systems) the user picks once among the plausible candidates (scripts: the first).
+        /// </summary>
+        public static int? ResolveEpsg(RhinoDoc doc, double e, double n, RunMode mode)
         {
             var p = GeoBimPlugin.Instance;
-            var res = ModelExport.Build(doc, objects, name, p.Epsg, p.DefaultUtmEpsg);
+            var setting = (p.Epsg ?? "auto").Replace("EPSG:", "").Trim();
+            if (!setting.Equals("auto", StringComparison.OrdinalIgnoreCase) && int.TryParse(setting, out int fixedCode)) return fixedCode;
+            if (int.TryParse(doc.Strings.GetValue("geobim", DocEpsgKey) ?? "", out int docCode)) return docCode;
+            var g = CrsDetect.Guess(e, n, p.DefaultUtmEpsg);
+            if (g.Epsg != null) return g.Epsg;
+            if (mode != RunMode.Interactive) return g.Candidates[0].Epsg;
+
+            RhinoApp.WriteLine(string.Format("geoBIM.app: map coordinates E {0:0} N {1:0} — {2}. Which coordinate system?", e, n, g.Region));
+            foreach (var c in g.Candidates) RhinoApp.WriteLine(string.Format("  {0} = EPSG:{1} {2}", c.Option, c.Epsg, c.Label));
+            var go = new GetOption();
+            go.SetCommandPrompt("Coordinate system of this model");
+            var idx = new Dictionary<int, CrsCandidate>();
+            foreach (var c in g.Candidates) idx[go.AddOption(c.Option)] = c;
+            int other = go.AddOption("OtherEPSG");
+            if (go.Get() != GetResult.Option) return null;
+            int code;
+            int chosenIndex = go.Option().Index;
+            if (chosenIndex == other)
+            {
+                code = g.Candidates[0].Epsg;
+                if (RhinoGet.GetInteger("EPSG code", false, ref code, 1000, 999999) != Result.Success) return null;
+            }
+            else code = idx[chosenIndex].Epsg;
+            doc.Strings.SetString("geobim", DocEpsgKey, code.ToString());
+            RhinoApp.WriteLine(string.Format("geoBIM.app: EPSG:{0} remembered for this document (change it with GeoBIMSettings → EPSG).", code));
+            return code;
+        }
+
+        public static ExportResult Export(RhinoDoc doc, List<RhinoObject> objects, string name, string path, RunMode mode)
+        {
+            var res = ModelExport.Build(doc, objects, name, (e, n) => ResolveEpsg(doc, e, n, mode));
+            if (res.Cancelled) return res;
             IfcWriter.Write(res.Model, path);
             RhinoApp.WriteLine(string.Format("geoBIM.app: {0} elements, {1:N0} triangles{2}; {3}",
                 res.Elements, res.Triangles, res.Skipped > 0 ? $", {res.Skipped} objects without surfaces skipped" : "", res.GeoRefInfo));
@@ -154,6 +192,12 @@ namespace GeoBimRhino
                         continue;
                     }
                     p.Epsg = e.ToLowerInvariant() == "auto" ? "auto" : e;
+                    // a new setting replaces the coordinate system chosen for this document
+                    if (doc.Strings.GetValue("geobim", Shared.DocEpsgKey) != null)
+                    {
+                        doc.Strings.Delete("geobim", Shared.DocEpsgKey);
+                        RhinoApp.WriteLine("geoBIM.app: the coordinate system chosen for this document was reset.");
+                    }
                 }
                 else if (idx == oUtm)
                 {
@@ -205,7 +249,8 @@ namespace GeoBimRhino
             else if (RhinoGet.GetString("IFC file", false, ref path) != Result.Success) return Result.Cancel;
             try
             {
-                Shared.Export(doc, objects, name, path);
+                var res = Shared.Export(doc, objects, name, path, mode);
+                if (res.Cancelled) return Result.Cancel;
                 RhinoApp.WriteLine("geoBIM.app: written {0}", path);
                 return Result.Success;
             }
@@ -270,8 +315,9 @@ namespace GeoBimRhino
                 Directory.CreateDirectory(dir);
                 var path = Path.Combine(dir, Safe(name) + ".ifc");
                 ExportResult res;
-                try { res = Shared.Export(doc, objects, name, path); }
+                try { res = Shared.Export(doc, objects, name, path, mode); }
                 catch (Exception ex) { RhinoApp.WriteLine("geoBIM.app: export failed — {0}", ex.Message); return Result.Failure; }
+                if (res.Cancelled) return Result.Cancel;
                 if (res.Elements == 0) { RhinoApp.WriteLine("geoBIM.app: no geometry to upload."); return Result.Nothing; }
 
                 uint docSerial = doc.RuntimeSerialNumber;
@@ -381,6 +427,20 @@ namespace GeoBimRhino
 
         static string Str(JsonElement e, string name) =>
             e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    }
+
+    // ------------------------------------------------------------------
+    [Guid("b3d2a8c4-5e1f-4f6a-9c7d-2e8b1a4f6d30")]
+    public class GeoBIMToolbarCommand : Command
+    {
+        public override string EnglishName => "GeoBIMToolbar";
+
+        protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+        {
+            if (GeoBimPlugin.ShowToolbar()) return Result.Success;
+            RhinoApp.WriteLine("geoBIM.app: toolbar file not found next to the plugin ({0}).", GeoBimPlugin.ToolbarPath);
+            return Result.Failure;
+        }
     }
 
     // ------------------------------------------------------------------
