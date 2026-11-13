@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Rhino 8 runs .NET 7 (8.0–8.19) or .NET 8 (8.20+); net7.0 loads in both, also on Mac -->
+    <TargetFramework>net7.0</TargetFramework>
+    <TargetExt>.rhp</TargetExt>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>GeoBimRhino</AssemblyName>
+    <RootNamespace>GeoBimRhino</RootNamespace>
+    <Version>0.1.0</Version>
+    <Company>geoBIM.app</Company>
+    <Product>geoBIM.app for Rhino</Product>
+    <Description>Uploads Rhino models to geoBIM.app (IFC 4 → geobim-tiler → 3D Tiles)</Description>
+    <Copyright>© 2026 Christof Lorenz — MPL 2.0</Copyright>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- net7.0 is out of support, Rhino 8 still needs it -->
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <!-- RhinoCommon's NuGet ships .NET Framework assemblies; Rhino 8 loads them on .NET 7/8 -->
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RhinoCommon" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>
