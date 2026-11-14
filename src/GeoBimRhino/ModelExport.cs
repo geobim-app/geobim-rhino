@@ -210,6 +210,30 @@ namespace GeoBimRhino
             e.R = color.R / 255.0; e.G = color.G / 255.0; e.B = color.B / 255.0;
             var mat = obj.GetMaterial(true);
             if (mat != null) e.Transparency = Math.Max(0, Math.Min(1, mat.Transparency));
+            // PBR for GLB: GetMaterial() is only a simplified copy of the render
+            // material, so ask the render material for its physically based form
+            PhysicallyBasedMaterial pb = mat != null && mat.IsPhysicallyBased ? mat.PhysicallyBased : null;
+            if (pb == null)
+            {
+                var rmat = obj.GetRenderMaterial(true);
+                if (rmat != null)
+                {
+                    try { pb = rmat.ConvertToPhysicallyBased(Rhino.Render.RenderTexture.TextureGeneration.Skip); }
+                    catch (Exception) { pb = null; }
+                }
+            }
+            if (pb != null)
+            {
+                var bc = pb.BaseColor;
+                e.Pbr = new PbrData
+                {
+                    R = Clamp01(bc.R), G = Clamp01(bc.G), B = Clamp01(bc.B),
+                    Alpha = Clamp01(pb.Opacity),
+                    Metallic = Clamp01(pb.Metallic),
+                    Roughness = Clamp01(pb.Roughness),
+                    Name = mat?.Name ?? ""
+                };
+            }
 
             string type = TypeName(obj.Geometry);
             string objName = attrs.Name;
@@ -250,8 +274,22 @@ namespace GeoBimRhino
                 e.Mesh.Triangles.Add(f.B);
                 e.Mesh.Triangles.Add(f.C);
             }
+            // Vertex normals (render meshes keep creases as split vertices)
+            if (mesh.Normals.Count != v.Count) mesh.Normals.ComputeNormals();
+            if (mesh.Normals.Count == v.Count)
+            {
+                for (int i = 0; i < v.Count; i++)
+                {
+                    var n = mesh.Normals[i];
+                    e.Mesh.Normals.Add(n.X);
+                    e.Mesh.Normals.Add(n.Y);
+                    e.Mesh.Normals.Add(n.Z);
+                }
+            }
             return e;
         }
+
+        static double Clamp01(double x) => double.IsNaN(x) ? 0 : Math.Max(0, Math.Min(1, x));
 
         static void AddUserText(IfcElementData e, NameValueCollection strings)
         {

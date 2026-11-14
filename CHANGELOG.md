@@ -3,6 +3,21 @@
 All notable changes to geoBIM.app for Rhino are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **GLB upload** (`GlbWriter.cs`, `Commands.cs`, `GeoBimClient.cs`, `ModelExport.cs`): `GeoBIMUpload`
+  has *Format = IFC/GLB* (remembered per document; IFC and GLB are separate models with their own
+  replace link). GLB is written by the plugin (binary glTF 2.0, Y-up, one node per object, vertex
+  normals, user text as `extras`) with the render material in physically based form — polished steel
+  stays a mirror in geoBIM.app. Placement from the EarthAnchorPoint (lon/lat, height above sea level
+  with `height_datum=orthometric`, model north as heading); needs geoBIM.app's GLB upload
+  (`api/pointcloud-upload.php`, beta). New command `GeoBIMExportGlb`. `GeoBIMOpen` opens the model of
+  the format used last. Tested in Rhino 8 with `examples/upload_knot_glb.py`: GLB checked with
+  trimesh (PBR metallic 1 / roughness 0.05, normals, bounds), uploaded to beta, placed at Cloud Gate
+  (41.882684, −87.623328, 180 m above sea level → 145.99 m ellipsoidal).
+
 ## [0.2.0] — 2026-11-13
 
 ### Added

@@ -71,6 +71,21 @@ namespace GeoBimRhino
         }
 
         public static string SlugKey(string server) => "slug|" + server.ToLowerInvariant();
+        /// <summary>The document's GLB model on that server (a separate model from the IFC one)</summary>
+        public static string GlbSlugKey(string server) => "glbslug|" + server.ToLowerInvariant();
+        public const string DocFormatKey = "format";
+
+        /// <summary>
+        /// Placement for a GLB upload from the EarthAnchorPoint: lon/lat of the model
+        /// origin, height above sea level (the server adds the geoid), heading of
+        /// the model's +Y axis clockwise from true north. Null without a Location.
+        /// </summary>
+        public static GeoBimClient.Placement GlbPlacement(IfcModelData m)
+        {
+            if (m.GeoRef != GeoRefKind.SiteLatLon) return null;
+            double heading = -Math.Atan2(m.TrueNorthX, m.TrueNorthY) * 180.0 / Math.PI;
+            return new GeoBimClient.Placement { Lon = m.Longitude, Lat = m.Latitude, Height = m.Elevation, Heading = heading, Orthometric = true };
+        }
 
         public static void OpenUrl(string url)
         {
@@ -118,11 +133,19 @@ namespace GeoBimRhino
             return code;
         }
 
-        public static ExportResult Export(RhinoDoc doc, List<RhinoObject> objects, string name, string path, RunMode mode)
+        public static ExportResult Export(RhinoDoc doc, List<RhinoObject> objects, string name, string path, RunMode mode, bool glb = false)
         {
-            var res = ModelExport.Build(doc, objects, name, (e, n) => ResolveEpsg(doc, e, n, mode));
+            // GLB is placed by lat/lon (EarthAnchorPoint); map coordinates would need a
+            // projection the plugin doesn't have, so don't ask for an EPSG code there
+            var res = ModelExport.Build(doc, objects, name, (e, n) => glb ? 0 : ResolveEpsg(doc, e, n, mode));
             if (res.Cancelled) return res;
-            IfcWriter.Write(res.Model, path);
+            if (glb)
+            {
+                if (res.Model.GeoRef == GeoRefKind.MapConversion)
+                    throw new InvalidOperationException("GLB needs the model near the origin with a Location (EarthAnchorPoint) — for map coordinates use Format=IFC");
+                if (res.Elements > 0) GlbWriter.Write(res.Model, path);
+            }
+            else IfcWriter.Write(res.Model, path);
             RhinoApp.WriteLine(string.Format("geoBIM.app: {0} elements, {1:N0} triangles{2}; {3}",
                 res.Elements, res.Triangles, res.Skipped > 0 ? $", {res.Skipped} objects without surfaces skipped" : "", res.GeoRefInfo));
             return res;
@@ -263,6 +286,42 @@ namespace GeoBimRhino
     }
 
     // ------------------------------------------------------------------
+    [Guid("9495752f-f6f0-47f0-b12b-71bf8777c390")]
+    public class GeoBIMExportGlbCommand : Command
+    {
+        public override string EnglishName => "GeoBIMExportGlb";
+
+        protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+        {
+            var r = Shared.SelectObjects(doc, out var objects);
+            if (r != Result.Success) return r;
+            string name = Shared.DocName(doc);
+            string path = Path.Combine(string.IsNullOrEmpty(doc.Path) ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments) : Path.GetDirectoryName(doc.Path), name + ".glb");
+            if (mode == RunMode.Interactive)
+            {
+                var dlg = new Rhino.UI.SaveFileDialog { Filter = "glTF binary (*.glb)|*.glb", FileName = path, Title = "Export GLB for geoBIM.app" };
+                if (!dlg.ShowSaveDialog()) return Result.Cancel;
+                path = dlg.FileName;
+            }
+            else if (RhinoGet.GetString("GLB file", false, ref path) != Result.Success) return Result.Cancel;
+            try
+            {
+                var res = Shared.Export(doc, objects, name, path, mode, true);
+                if (res.Cancelled) return Result.Cancel;
+                var pl = Shared.GlbPlacement(res.Model);
+                RhinoApp.WriteLine("geoBIM.app: written {0}{1}", path, pl == null ? "" : string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    " — placement lon {0:0.000000}, lat {1:0.000000}, {2:0.##} m above sea level, heading {3:0.#}°", pl.Lon, pl.Lat, pl.Height, pl.Heading));
+                return Result.Success;
+            }
+            catch (Exception ex)
+            {
+                RhinoApp.WriteLine("geoBIM.app: export failed — {0}", ex.Message);
+                return Result.Failure;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     [Guid("de663117-0942-4c47-8678-11e22b700844")]
     public class GeoBIMUploadCommand : Command
     {
@@ -290,43 +349,59 @@ namespace GeoBimRhino
                 if (r != Result.Success) return r;
 
                 string server = p.Server;
-                string key = Shared.SlugKey(server);
-                string previous = doc.Strings.GetValue("geobim", key);
                 string name = Shared.DocName(doc);
-                var asNew = new OptionToggle(string.IsNullOrEmpty(previous), "Replace", "New");
-                var gs = new GetString();
-                gs.SetCommandPrompt(string.IsNullOrEmpty(previous)
-                    ? "Model name in geoBIM.app"
-                    : $"Model name in geoBIM.app (replaces \"{previous}\")");
-                gs.SetDefaultString(name);
-                gs.AcceptNothing(true);
-                if (!string.IsNullOrEmpty(previous)) gs.AddOptionToggle("Model", ref asNew);
+                // Format: IFC (converted to 3D Tiles, properties) or GLB (as is, with
+                // PBR materials such as polished steel); remembered per document,
+                // each format has its own model on the server
+                var glbFormat = new OptionToggle(doc.Strings.GetValue("geobim", Shared.DocFormatKey) == "glb", "IFC", "GLB");
+                var asNew = new OptionToggle(false, "Replace", "New");
+                bool asNewTouched = false;
+                string key, previous;
                 while (true)
                 {
+                    key = glbFormat.CurrentValue ? Shared.GlbSlugKey(server) : Shared.SlugKey(server);
+                    previous = doc.Strings.GetValue("geobim", key);
+                    if (!asNewTouched) asNew.CurrentValue = string.IsNullOrEmpty(previous);
+                    var gs = new GetString();
+                    gs.SetCommandPrompt(string.IsNullOrEmpty(previous)
+                        ? "Model name in geoBIM.app"
+                        : $"Model name in geoBIM.app (replaces \"{previous}\")");
+                    gs.SetDefaultString(name);
+                    gs.AcceptNothing(true);
+                    int optFormat = gs.AddOptionToggle("Format", ref glbFormat);
+                    int optModel = string.IsNullOrEmpty(previous) ? -1 : gs.AddOptionToggle("Model", ref asNew);
                     var gr = gs.Get();
-                    if (gr == GetResult.Option) continue;
+                    if (gr == GetResult.Option)
+                    {
+                        if (gs.OptionIndex() == optModel) asNewTouched = true;
+                        if (gs.OptionIndex() == optFormat) asNewTouched = false;
+                        continue;
+                    }
                     if (gr == GetResult.String) { var s = gs.StringResult().Trim(); if (s.Length > 0) name = s; break; }
                     if (gr == GetResult.Nothing) break;
                     return Result.Cancel;
                 }
-                string replace = asNew.CurrentValue ? null : previous;
+                bool glb = glbFormat.CurrentValue;
+                doc.Strings.SetString("geobim", Shared.DocFormatKey, glb ? "glb" : "ifc");
+                string replace = asNew.CurrentValue || string.IsNullOrEmpty(previous) ? null : previous;
 
                 var dir = Path.Combine(Path.GetTempPath(), "geobim-rhino");
                 Directory.CreateDirectory(dir);
-                var path = Path.Combine(dir, Safe(name) + ".ifc");
+                var path = Path.Combine(dir, Safe(name) + (glb ? ".glb" : ".ifc"));
                 ExportResult res;
-                try { res = Shared.Export(doc, objects, name, path, mode); }
+                try { res = Shared.Export(doc, objects, name, path, mode, glb); }
                 catch (Exception ex) { RhinoApp.WriteLine("geoBIM.app: export failed — {0}", ex.Message); return Result.Failure; }
                 if (res.Cancelled) return Result.Cancel;
                 if (res.Elements == 0) { RhinoApp.WriteLine("geoBIM.app: no geometry to upload."); return Result.Nothing; }
+                var placement = glb ? Shared.GlbPlacement(res.Model) : null;
 
                 uint docSerial = doc.RuntimeSerialNumber;
                 var client = new GeoBimClient(server, p.Token);
-                RhinoApp.WriteLine("geoBIM.app: uploading {0:N1} MB to {1}{2}…", new FileInfo(path).Length / 1048576.0, server,
-                    replace != null ? $" (replaces {replace})" : "");
+                RhinoApp.WriteLine(string.Format("geoBIM.app: uploading {0} {1:N1} MB to {2}{3}…", glb ? "GLB" : "IFC", new FileInfo(path).Length / 1048576.0, server,
+                    replace != null ? $" (replaces {replace})" : ""));
                 Rhino.UI.StatusBar.ShowProgressMeter(docSerial, 0, 100, "geoBIM.app upload", true, true);
                 started = true;
-                Task.Run(() => Run(client, path, name, replace, key, docSerial));
+                Task.Run(() => Run(client, path, name, replace, key, docSerial, placement));
                 return Result.Success;
             }
             finally
@@ -342,7 +417,7 @@ namespace GeoBimRhino
             return sb.Length > 0 ? sb.ToString() : "model";
         }
 
-        static async Task Run(GeoBimClient client, string path, string name, string replace, string key, uint docSerial)
+        static async Task Run(GeoBimClient client, string path, string name, string replace, string key, uint docSerial, GeoBimClient.Placement placement)
         {
             int lastPct = -1;
             var progress = new Progress<double>(f =>
@@ -357,12 +432,12 @@ namespace GeoBimRhino
                 GeoBimClient.UploadResult up;
                 try
                 {
-                    up = await client.Upload(path, name, replace, progress).ConfigureAwait(false);
+                    up = await client.Upload(path, name, replace, progress, default, placement).ConfigureAwait(false);
                 }
                 catch (GeoBimClient.ApiException ex) when (replace != null && ex.Status == HttpStatusCode.NotFound)
                 {
                     Shared.Ui(() => RhinoApp.WriteLine("geoBIM.app: the previous model is gone on the server — uploading as a new model."));
-                    up = await client.Upload(path, name, null, progress).ConfigureAwait(false);
+                    up = await client.Upload(path, name, null, progress, default, placement).ConfigureAwait(false);
                 }
                 // Only the upload blocks a new one; the conversion is followed in the background
                 Interlocked.Exchange(ref _busy, 0);
@@ -385,12 +460,12 @@ namespace GeoBimRhino
                     var status = Str(st, "status");
                     if (status == "done")
                     {
-                        var placement = Str(st, "placement");
+                        var placed = Str(st, "placement");
                         var warning = Str(st, "warning");
                         var url = client.ModelUrl(up.Slug);
                         Shared.Ui(() =>
                         {
-                            RhinoApp.WriteLine("geoBIM.app: ready — {0}{1}", url, string.IsNullOrEmpty(placement) ? "" : $" (placement: {placement})");
+                            RhinoApp.WriteLine("geoBIM.app: ready — {0}{1}", url, string.IsNullOrEmpty(placed) ? "" : $" (placement: {placed})");
                             if (!string.IsNullOrEmpty(warning)) RhinoApp.WriteLine("geoBIM.app: note — {0}", warning);
                             Shared.OpenUrl(url);
                         });
@@ -452,7 +527,10 @@ namespace GeoBimRhino
         protected override Result RunCommand(RhinoDoc doc, RunMode mode)
         {
             var p = GeoBimPlugin.Instance;
-            var slug = doc.Strings.GetValue("geobim", Shared.SlugKey(p.Server));
+            // the model of the format used last (GLB and IFC are separate models)
+            bool glb = doc.Strings.GetValue("geobim", Shared.DocFormatKey) == "glb";
+            var slug = doc.Strings.GetValue("geobim", glb ? Shared.GlbSlugKey(p.Server) : Shared.SlugKey(p.Server))
+                       ?? doc.Strings.GetValue("geobim", glb ? Shared.SlugKey(p.Server) : Shared.GlbSlugKey(p.Server));
             var url = string.IsNullOrEmpty(slug) ? p.Server : new GeoBimClient(p.Server, p.Token).ModelUrl(slug);
             Shared.OpenUrl(url);
             return Result.Success;

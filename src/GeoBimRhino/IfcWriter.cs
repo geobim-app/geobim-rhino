@@ -25,6 +25,8 @@ namespace GeoBimRhino
         public List<double> Coordinates = new List<double>();
         /// <summary>0-based vertex indices, three per triangle</summary>
         public List<int> Triangles = new List<int>();
+        /// <summary>nx, ny, nz per vertex (unit length) — used by the GLB writer, empty = flat</summary>
+        public List<float> Normals = new List<float>();
         public int VertexCount => Coordinates.Count / 3;
     }
 
@@ -36,9 +38,18 @@ namespace GeoBimRhino
         public string ObjectType = "";
         public string Layer = "";
         public double R = 0.8, G = 0.8, B = 0.8, Transparency;
+        /// <summary>Physically based material (Rhino PBR), for GLB; null = not PBR</summary>
+        public PbrData Pbr;
         public IfcMesh Mesh = new IfcMesh();
         public List<KeyValuePair<string, string>> RhinoProps = new List<KeyValuePair<string, string>>();
         public List<KeyValuePair<string, string>> UserText = new List<KeyValuePair<string, string>>();
+    }
+
+    public class PbrData
+    {
+        public double R = 0.8, G = 0.8, B = 0.8, Alpha = 1;   // base colour, linear 0–1
+        public double Metallic, Roughness = 0.5;
+        public string Name = "";
     }
 
     public enum GeoRefKind { None, MapConversion, SiteLatLon }

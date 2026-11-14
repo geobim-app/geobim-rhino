@@ -19,7 +19,8 @@ namespace GeoBimRhino
     /// <summary>
     /// geoBIM.app API as used by the plugin (all with the plugin token):
     ///   api/plugin-whoami.php       — test connection
-    ///   api/pointcloud-upload.php   — upload (IFC), optional replace=&lt;slug&gt;
+    ///   api/pointcloud-upload.php   — upload (IFC or GLB), optional replace=&lt;slug&gt;,
+    ///                                 for GLB lon/lat/height/heading/height_datum
     ///   api/pointcloud-status.php   — conversion status of a job
     /// </summary>
     public class GeoBimClient
@@ -82,7 +83,14 @@ namespace GeoBimRhino
 
         public class UploadResult { public string JobId; public string Slug; public bool Replaced; }
 
-        public async Task<UploadResult> Upload(string filePath, string name, string replaceSlug, IProgress<double> progress, CancellationToken ct = default)
+        /// <summary>Position sent with a GLB (the server stores it as the model's placement)</summary>
+        public class Placement
+        {
+            public double Lon, Lat, Height, Heading;
+            public bool Orthometric;   // Height above sea level; the server adds the geoid
+        }
+
+        public async Task<UploadResult> Upload(string filePath, string name, string replaceSlug, IProgress<double> progress, CancellationToken ct = default, Placement placement = null)
         {
             using (var req = Request(HttpMethod.Post, "api/pointcloud-upload.php"))
             using (var form = new MultipartFormDataContent())
@@ -93,6 +101,15 @@ namespace GeoBimRhino
                 form.Add(file, "file", Path.GetFileName(filePath));
                 form.Add(new StringContent(name ?? ""), "name");
                 if (!string.IsNullOrEmpty(replaceSlug)) form.Add(new StringContent(replaceSlug), "replace");
+                if (placement != null)
+                {
+                    var inv = System.Globalization.CultureInfo.InvariantCulture;
+                    form.Add(new StringContent(placement.Lon.ToString("R", inv)), "lon");
+                    form.Add(new StringContent(placement.Lat.ToString("R", inv)), "lat");
+                    form.Add(new StringContent(placement.Height.ToString("R", inv)), "height");
+                    form.Add(new StringContent(placement.Heading.ToString("R", inv)), "heading");
+                    form.Add(new StringContent(placement.Orthometric ? "orthometric" : "ellipsoid"), "height_datum");
+                }
                 req.Content = form;
                 using (var resp = await Http.SendAsync(req, ct).ConfigureAwait(false))
                 {

@@ -29,11 +29,28 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 
 | Command | What it does |
 |---|---|
-| `GeoBIMUpload` | Select objects (Enter = all visible) → name → IFC → upload with progress → follows the conversion in the command line → opens the model in the browser. The document remembers the model: the next upload **replaces** it (same link); choose *Model = New* for a separate one. |
+| `GeoBIMUpload` | Select objects (Enter = all visible) → name → IFC → upload with progress → follows the conversion in the command line → opens the model in the browser. The document remembers the model: the next upload **replaces** it (same link); choose *Model = New* for a separate one. *Format = GLB* uploads a GLB instead (see below); the document remembers the format, IFC and GLB are separate models. |
 | `GeoBIMExportIfc` | Writes the IFC only (`-GeoBIMExportIfc` takes the file name on the command line, for scripts). |
+| `GeoBIMExportGlb` | Writes the GLB only (`-GeoBIMExportGlb` likewise) and prints the placement it would send. |
 | `GeoBIMOpen` | Opens the document's model (or the server) in the browser. |
 | `GeoBIMSettings` | Server, token, EPSG, connection test. |
 | `GeoBIMToolbar` | Shows the geoBIM.app toolbar (Upload, Open, Export IFC, Settings). |
+
+## GLB instead of IFC
+
+For sculptures, design studies and anything where the look matters more than IFC classes and
+properties: `GeoBIMUpload` → *Format = GLB* (needs a geoBIM.app with GLB upload, beta since 2026-11-14).
+
+- **Stored as is** on the server (`model/<name>.glb`, no conversion), so it is ready right away.
+- **Materials**: the Rhino render material in its physically based form — base colour, metallic,
+  roughness, opacity (e.g. polished stainless steel: metallic 1, roughness 0.05 → a mirror in
+  geoBIM.app). Objects without a render material get their display colour, matt.
+- **Geometry**: render meshes with vertex normals, one glTF node per Rhino object (blocks resolved),
+  name, layer and user text as node `extras`.
+- **Placement** from the *Location* (EarthAnchorPoint): lon/lat of the model base point, its height
+  above sea level (the server adds the geoid: GCG2016 in Germany, EGM2008 elsewhere) and model north
+  as heading. Without a Location geoBIM.app places it at the centre of the view; models in map
+  coordinates need *Format = IFC*.
 
 ## What ends up in the IFC
 
