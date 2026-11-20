@@ -1,13 +1,24 @@
 # geoBIM.app for Rhino
 
-Rhino 8 plugin that uploads Rhino models straight to [geoBIM.app](https://viewer.geobim.app):
-the selected objects become an **IFC 4** file, the geoBIM.app server converts it with the
-geobim-tiler into 3D Tiles, and the browser opens the model in place — georeferenced, with
-colours, layers and user text as properties.
+Rhino 8 plugin (Windows) that puts Rhino models in their place on the map:
+
+- **Upload to [geoBIM.app](https://viewer.geobim.app)**: the selection becomes an **IFC 4** file (or a GLB with PBR
+  materials), the geoBIM.app server converts it into 3D Tiles, and the browser opens the model in place, with colours,
+  layers and user text as properties.
+- **Upload to [Cesium ion](https://ion.cesium.com)** into your own account, as a 3D Tiles asset.
+- **Georeferencing in one step** (`GeoBIMLocation`): pick a point of the model and give its position as map
+  coordinates (LV95, UTM, …), latitude/longitude, a place or address, or a click on a map. IFC, GLB and Cesium ion
+  then land in the same place, with the right height and north.
+- **Export** IFC 4 and GLB files without uploading.
 
 ```
-Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ──► geobim-tiler ──► viewer.geobim.app/?model=<slug>
+Rhino objects ──► IFC 4 / GLB (plugin) ──► geoBIM.app (3D Tiles) or Cesium ion ──► viewer, georeferenced
 ```
+
+> **Beta.** Version 0.3.0 is a public beta. Please report problems and wishes as
+> [GitHub issues](https://github.com/geobim-app/geobim-rhino/issues) or to info@geobim.app.
+> **Uploads to geoBIM.app need a geoBIM.app account** with a plugin token; ask for one at info@geobim.app.
+> Export, georeferencing and Cesium ion (your own ion account) work without it.
 
 ## Install
 
