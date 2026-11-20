@@ -7,7 +7,7 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <AssemblyName>GeoBimRhino</AssemblyName>
     <RootNamespace>GeoBimRhino</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Company>geoBIM.app</Company>
     <Product>geoBIM.app for Rhino</Product>
     <Description>Uploads Rhino models to geoBIM.app (IFC 4 → geobim-tiler → 3D Tiles)</Description>

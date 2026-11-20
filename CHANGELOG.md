@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-20
+
 ### Added
 
 - **Map origin for local coordinates** (`MapOrigin.cs`, `ModelExport.cs`, `Commands.cs`): the document

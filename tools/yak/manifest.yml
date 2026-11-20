@@ -9,7 +9,7 @@ description: >
   an IFC 4 (or GLB) with colours, layers and user text as properties, are converted to 3D Tiles
   and open in the browser in place. Georeferencing from map coordinates (UTM, LV95, Gauss-Krüger,
   Austrian systems), a map origin stored in the document, or the EarthAnchorPoint.
-url: https://github.com/geobim-app/geobim-rhino
+url: https://geobim.app
 icon: icon.png
 keywords:
 - geobim

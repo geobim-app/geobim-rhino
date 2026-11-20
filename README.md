@@ -11,10 +11,30 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 
 ## Install
 
-1. Build (see below) or take `GeoBimRhino.rhp` from a release.
+### Package Manager (recommended)
+
+For Rhino 8 on Windows, from version 0.3.0:
+
+1. In Rhino, run `PackageManager` (or *Tools → Package Manager*).
+2. Search for **geobim** and click *Install*.
+3. Restart Rhino. The plugin then loads at every start and opens the **geoBIM.app toolbar**;
+   `GeoBIMToolbar` shows it again.
+
+The Package Manager also offers new versions, and removes the plugin again: select it among the installed
+packages and click *Uninstall*.
+
+### By hand
+
+For a build of your own:
+
+1. Build the plugin (see *Build*): `src/GeoBimRhino/bin/Release/net7.0/GeoBimRhino.rhp` with `GeoBimRhino.rui`
+   next to it.
 2. Drag `GeoBimRhino.rhp` into the Rhino window (or *Tools → Options → Plug-ins → Install…*).
    It loads at startup from then on and opens the **geoBIM.app toolbar** (`GeoBimRhino.rui` next to
    the `.rhp`); `GeoBIMToolbar` shows it again.
+
+Do not install both ways at once: remove a Package Manager install before loading your own build, and the other
+way round.
 
 ## Set up (once)
 
@@ -168,7 +188,8 @@ dotnet build src/GeoBimRhino/GeoBimRhino.csproj -c Release
 Package for the Rhino Package Manager (Yak, Windows): `python tools/make_yak.py` builds and writes
 `dist/geobim-<version>-rh8_0-win.yak` (manifest and icon in `tools/yak/`). It does not push; try a
 package on `https://test.yak.rhino3d.com` first, because a version pushed to the public server
-cannot be replaced.
+cannot be replaced. To install from the test server, add it as a source in Rhino (*Tools → Options →
+Package Manager*) and search for **geobim** as above.
 
 ## Test
 
