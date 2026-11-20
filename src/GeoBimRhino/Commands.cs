@@ -8,6 +8,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -154,6 +155,26 @@ namespace GeoBimRhino
                 res.Elements, res.Triangles, res.Skipped > 0 ? $", {res.Skipped} objects without surfaces skipped" : "", res.GeoRefInfo));
             return res;
         }
+
+        /// <summary>IFC for Cesium ion: east/north/up around the Location, position in IonLon/IonLat/IonElevation</summary>
+        public static ExportResult ExportIon(RhinoDoc doc, List<RhinoObject> objects, string name, string path)
+        {
+            var res = ModelExport.Build(doc, objects, name, (e, n) => 0, null, true);
+            if (res.Elements > 0) IfcWriter.Write(res.Model, path);
+            RhinoApp.WriteLine(string.Format("Cesium ion: {0} elements, {1:N0} triangles{2}; {3}",
+                res.Elements, res.Triangles, res.Skipped > 0 ? $", {res.Skipped} objects without surfaces skipped" : "", res.GeoRefInfo));
+            return res;
+        }
+
+        public const string DocGeoidKey = "geoidN";
+        public const string DocIonAssetKey = "ionasset";
+
+        public static string Safe(string s)
+        {
+            var sb = new StringBuilder();
+            foreach (var c in s) sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
+            return sb.Length > 0 ? sb.ToString() : "model";
+        }
     }
 
     // ------------------------------------------------------------------
@@ -178,6 +199,8 @@ namespace GeoBimRhino
                 int oEpsg = go.AddOption("EPSG");
                 int oUtm = go.AddOption("DefaultUTM");
                 int oTest = go.AddOption("Test");
+                int oIonToken = go.AddOption("IonToken");
+                int oIonTest = go.AddOption("IonTest");
                 go.AcceptNothing(true);
                 var r = go.Get();
                 if (r == GetResult.Nothing) return Result.Success;
@@ -199,9 +222,17 @@ namespace GeoBimRhino
                 else if (idx == oBeta) p.Server = "https://beta.geobim.app";
                 else if (idx == oToken)
                 {
-                    string t = "";
-                    if (RhinoGet.GetString("Plugin token (geoBIM.app → Account → Rhino plugin → Create)", false, ref t) != Result.Success) continue;
+                    string t = AskToken(mode, "geoBIM.app plugin token", "Plugin token (geoBIM.app → Account → Rhino plugin → Create)");
+                    if (t == null) continue;
                     t = t.Trim();
+                    if (LooksLikeIonToken(t))
+                    {
+                        // pasted into the wrong option: a Cesium ion token is a JWT (eyJ…, two dots)
+                        p.IonToken = t;
+                        RhinoApp.WriteLine("geoBIM.app: that is a Cesium ion token, not a geoBIM.app plugin token — saved as the Cesium ion token instead.");
+                        IonTest(p);
+                        continue;
+                    }
                     if (!t.StartsWith("gbp_") || t.Length != 47)
                     {
                         RhinoApp.WriteLine("geoBIM.app: that is not a plugin token (gbp_…, 47 characters).");
@@ -238,6 +269,86 @@ namespace GeoBimRhino
                 {
                     Test(p);
                 }
+                else if (idx == oIonToken)
+                {
+                    string t = AskToken(mode, "Cesium ion access token",
+                        "Cesium ion access token (ion.cesium.com → Access Tokens). It needs the scopes assets:list, assets:read and assets:write.");
+                    if (t == null) continue;
+                    t = t.Trim();
+                    if (t.StartsWith("gbp_"))
+                    {
+                        RhinoApp.WriteLine("Cesium ion: that is a geoBIM.app plugin token — choose Token for it. The Cesium ion token comes from ion.cesium.com → Access Tokens.");
+                        continue;
+                    }
+                    if (!LooksLikeIonToken(t))
+                    {
+                        RhinoApp.WriteLine("Cesium ion: that does not look like an ion access token (a long eyJ… string with two dots).");
+                        continue;
+                    }
+                    p.IonToken = t;
+                    RhinoApp.WriteLine("Cesium ion: token saved.");
+                    IonTest(p);
+                }
+                else if (idx == oIonTest)
+                {
+                    IonTest(p);
+                }
+            }
+        }
+
+        static bool LooksLikeIonToken(string t) => t.StartsWith("eyJ") && t.Length >= 40 && t.Count(ch => ch == '.') == 2;
+
+        /// <summary>
+        /// A token: in a small dialog with a hidden field when interactive (Rhino's command line
+        /// would echo it in the history), on the command line when scripted (-GeoBIMSettings).
+        /// Null when cancelled.
+        /// </summary>
+        static string AskToken(RunMode mode, string title, string prompt)
+        {
+            if (mode != RunMode.Interactive)
+            {
+                string s = "";
+                return RhinoGet.GetString(prompt, false, ref s) == Result.Success ? s : null;
+            }
+            var box = new Eto.Forms.PasswordBox { Width = 460 };
+            var dlg = new Eto.Forms.Dialog<bool> { Title = title, Padding = new Eto.Drawing.Padding(12), Resizable = false };
+            var ok = new Eto.Forms.Button { Text = "OK" };
+            var cancel = new Eto.Forms.Button { Text = "Cancel" };
+            ok.Click += (s, e) => dlg.Close(true);
+            cancel.Click += (s, e) => dlg.Close(false);
+            dlg.DefaultButton = ok;
+            dlg.AbortButton = cancel;
+            var buttons = new Eto.Forms.StackLayout { Orientation = Eto.Forms.Orientation.Horizontal, Spacing = 6 };
+            buttons.Items.Add(new Eto.Forms.StackLayoutItem(null, true));
+            buttons.Items.Add(ok);
+            buttons.Items.Add(cancel);
+            var layout = new Eto.Forms.StackLayout { Spacing = 10, HorizontalContentAlignment = Eto.Forms.HorizontalAlignment.Stretch };
+            layout.Items.Add(new Eto.Forms.Label { Text = prompt, Wrap = Eto.Forms.WrapMode.Word, Width = 460 });
+            layout.Items.Add(box);
+            layout.Items.Add(buttons);
+            dlg.Content = layout;
+            return dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow) ? box.Text : null;
+        }
+
+        static void IonTest(GeoBimPlugin p)
+        {
+            if (string.IsNullOrEmpty(p.IonToken)) { RhinoApp.WriteLine("Cesium ion: no token yet — choose IonToken first."); return; }
+            try
+            {
+                var client = new IonClient(p.IonToken);
+                Task.Run(() => client.CountAssets()).GetAwaiter().GetResult();
+                bool? write = Task.Run(() => client.CanWrite()).GetAwaiter().GetResult();
+                if (write == true)
+                    RhinoApp.WriteLine("Cesium ion: connected (token {0}), assets can be created — GeoBIMUploadIon is ready.", GeoBimPlugin.MaskedToken(p.IonToken));
+                else if (write == false)
+                    RhinoApp.WriteLine("Cesium ion: the token can read but not create assets — it lacks the assets:write scope. " +
+                                       "Create a token with assets:list, assets:read and assets:write at ion.cesium.com → Access Tokens.");
+                else
+                    RhinoApp.WriteLine("Cesium ion: connected (token {0}); whether it may create assets is unclear — it needs the assets:write scope.", GeoBimPlugin.MaskedToken(p.IonToken));
+            }
+            catch (Exception ex)
+            {
+                RhinoApp.WriteLine("Cesium ion: connection failed — {0}", (ex as AggregateException)?.InnerException?.Message ?? ex.Message);
             }
         }
 
@@ -254,6 +365,66 @@ namespace GeoBimRhino
             {
                 RhinoApp.WriteLine("geoBIM.app: connection failed — {0}", (ex as AggregateException)?.InnerException?.Message ?? ex.Message);
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    /// <summary>
+    /// Map origin of this document: the model stays in local coordinates and the
+    /// IFC export writes IfcMapConversion from E0/N0/H0 (and a rotation), so no
+    /// second copy of the model in real map coordinates is needed.
+    /// Scripted: -GeoBIMMapOrigin 2755000,1206000,0,0 or -GeoBIMMapOrigin Clear
+    /// </summary>
+    [Guid("714cd07f-7895-4bf7-a22c-4a77bc5acd3e")]
+    public class GeoBIMMapOriginCommand : Command
+    {
+        public override string EnglishName => "GeoBIMMapOrigin";
+
+        protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+        {
+            var current = MapOrigin.FromDoc(doc);
+            RhinoApp.WriteLine(current == null
+                ? "geoBIM.app: this document has no map origin (local coordinates are placed by the Location, if any)."
+                : $"geoBIM.app: map origin of this document: {current.Describe()} — local x = E − E0, y = N − N0, z = H − H0.");
+
+            var gs = new GetString();
+            gs.SetCommandPrompt("Map coordinates of the model origin E,N[,H[,rotation°]] (Enter keeps)");
+            if (current != null) gs.SetDefaultString(current.ToString());
+            gs.AcceptNothing(true);
+            int optClear = gs.AddOption("Clear");
+            var r = gs.Get();
+            if (r == GetResult.Option && gs.OptionIndex() == optClear)
+            {
+                MapOrigin.Clear(doc);
+                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
+                return Result.Success;
+            }
+            if (r == GetResult.Nothing) return Result.Success;
+            if (r != GetResult.String) return Result.Cancel;
+
+            var text = gs.StringResult().Trim();
+            if (text.Equals("Clear", StringComparison.OrdinalIgnoreCase))
+            {
+                MapOrigin.Clear(doc);
+                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
+                return Result.Success;
+            }
+            var mo = MapOrigin.Parse(text);
+            if (mo == null)
+            {
+                RhinoApp.WriteLine("geoBIM.app: expected E,N[,H[,rotation]] in metres and degrees, e.g. 2755000,1206000,0,0");
+                return Result.Failure;
+            }
+            if (!CrsDetect.LooksLikeMap(mo.E, mo.N))
+            {
+                RhinoApp.WriteLine("geoBIM.app: E {0:0} N {1:0} are not map coordinates (more than 100 km from 0 expected).", mo.E, mo.N);
+                return Result.Failure;
+            }
+            mo.Save(doc);
+            var guess = CrsDetect.Guess(mo.E, mo.N, GeoBimPlugin.Instance.DefaultUtmEpsg);
+            RhinoApp.WriteLine("geoBIM.app: map origin set to {0}{1}. The IFC export writes IfcMapConversion; GLB still uses the Location.",
+                mo.Describe(), guess.Epsg != null ? $" (EPSG:{guess.Epsg}, {guess.Region})" : $" ({guess.Region}: the coordinate system is asked on export)");
+            return Result.Success;
         }
     }
 
@@ -324,66 +495,6 @@ namespace GeoBimRhino
                 RhinoApp.WriteLine("geoBIM.app: export failed — {0}", ex.Message);
                 return Result.Failure;
             }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    /// <summary>
-    /// Map origin of this document: the model stays in local coordinates and the
-    /// IFC export writes IfcMapConversion from E0/N0/H0 (and a rotation), so no
-    /// second copy of the model in real map coordinates is needed.
-    /// Scripted: -GeoBIMMapOrigin 2755000,1206000,0,0 or -GeoBIMMapOrigin Clear
-    /// </summary>
-    [Guid("714cd07f-7895-4bf7-a22c-4a77bc5acd3e")]
-    public class GeoBIMMapOriginCommand : Command
-    {
-        public override string EnglishName => "GeoBIMMapOrigin";
-
-        protected override Result RunCommand(RhinoDoc doc, RunMode mode)
-        {
-            var current = MapOrigin.FromDoc(doc);
-            RhinoApp.WriteLine(current == null
-                ? "geoBIM.app: this document has no map origin (local coordinates are placed by the Location, if any)."
-                : $"geoBIM.app: map origin of this document: {current.Describe()} — local x = E − E0, y = N − N0, z = H − H0.");
-
-            var gs = new GetString();
-            gs.SetCommandPrompt("Map coordinates of the model origin E,N[,H[,rotation°]] (Enter keeps)");
-            if (current != null) gs.SetDefaultString(current.ToString());
-            gs.AcceptNothing(true);
-            int optClear = gs.AddOption("Clear");
-            var r = gs.Get();
-            if (r == GetResult.Option && gs.OptionIndex() == optClear)
-            {
-                MapOrigin.Clear(doc);
-                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
-                return Result.Success;
-            }
-            if (r == GetResult.Nothing) return Result.Success;
-            if (r != GetResult.String) return Result.Cancel;
-
-            var text = gs.StringResult().Trim();
-            if (text.Equals("Clear", StringComparison.OrdinalIgnoreCase))
-            {
-                MapOrigin.Clear(doc);
-                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
-                return Result.Success;
-            }
-            var mo = MapOrigin.Parse(text);
-            if (mo == null)
-            {
-                RhinoApp.WriteLine("geoBIM.app: expected E,N[,H[,rotation]] in metres and degrees, e.g. 2755000,1206000,0,0");
-                return Result.Failure;
-            }
-            if (!CrsDetect.LooksLikeMap(mo.E, mo.N))
-            {
-                RhinoApp.WriteLine("geoBIM.app: E {0:0} N {1:0} are not map coordinates (more than 100 km from 0 expected).", mo.E, mo.N);
-                return Result.Failure;
-            }
-            mo.Save(doc);
-            var guess = CrsDetect.Guess(mo.E, mo.N, GeoBimPlugin.Instance.DefaultUtmEpsg);
-            RhinoApp.WriteLine("geoBIM.app: map origin set to {0}{1}. The IFC export writes IfcMapConversion; GLB still uses the Location.",
-                mo.Describe(), guess.Epsg != null ? $" (EPSG:{guess.Epsg}, {guess.Region})" : $" ({guess.Region}: the coordinate system is asked on export)");
-            return Result.Success;
         }
     }
 
@@ -476,12 +587,7 @@ namespace GeoBimRhino
             }
         }
 
-        static string Safe(string s)
-        {
-            var sb = new StringBuilder();
-            foreach (var c in s) sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
-            return sb.Length > 0 ? sb.ToString() : "model";
-        }
+        static string Safe(string s) => Shared.Safe(s);
 
         static async Task Run(GeoBimClient client, string path, string name, string replace, string key, uint docSerial, GeoBimClient.Placement placement)
         {
@@ -568,6 +674,201 @@ namespace GeoBimRhino
 
         static string Str(JsonElement e, string name) =>
             e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    }
+
+    // ------------------------------------------------------------------
+    /// <summary>
+    /// Upload to Cesium ion: the selection becomes an IFC in east/north/up metres
+    /// around the Location (EarthAnchorPoint), ion's BIM/CAD tiler places its origin
+    /// at the Location's lon/lat and the height above sea level plus the geoid
+    /// undulation N (ion heights are ellipsoidal). Every upload is a new ion asset.
+    /// Scripted: _-GeoBIMUploadIon _Enter GeoidN=48.7 "name"
+    /// </summary>
+    [Guid("d192ead3-ee5e-4009-9cb6-a78788f1f712")]
+    public class GeoBIMUploadIonCommand : Command
+    {
+        public override string EnglishName => "GeoBIMUploadIon";
+
+        static int _busy;
+
+        protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+        {
+            var p = GeoBimPlugin.Instance;
+            if (!doc.EarthAnchorPoint.EarthLocationIsSet())
+            {
+                RhinoApp.WriteLine("Cesium ion: this document has no Location — set it with the EarthAnchorPoint command (the model base point and model north place the model).");
+                return Result.Cancel;
+            }
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+            {
+                RhinoApp.WriteLine("Cesium ion: an upload is still running.");
+                return Result.Cancel;
+            }
+            bool started = false;
+            try
+            {
+                var r = Shared.SelectObjects(doc, out var objects);
+                if (r != Result.Success) return r;
+
+                string name = Shared.DocName(doc);
+                string stored = doc.Strings.GetValue("geobim", Shared.DocGeoidKey);
+                // 0 counts as not set: the undulation is almost nowhere 0, and 0 is what an Enter on an empty prompt gives
+                bool geoidKnown = double.TryParse(stored ?? "", NumberStyles.Float, CultureInfo.InvariantCulture, out double geoidValue) && geoidValue != 0;
+                var geoid = new OptionDouble(geoidKnown ? geoidValue : 0, -120, 120);
+                var upload = new OptionToggle(true, "No", "Yes");
+                while (true)
+                {
+                    var gs = new GetString();
+                    gs.SetCommandPrompt(geoidKnown
+                        ? "Asset name in Cesium ion"
+                        : "Asset name in Cesium ion (set GeoidN: geoid undulation in metres at the site, e.g. 48.7 in eastern Switzerland)");
+                    gs.SetDefaultString(name);
+                    gs.AcceptNothing(true);
+                    int optGeoid = gs.AddOptionDouble("GeoidN", ref geoid);
+                    gs.AddOptionToggle("Upload", ref upload);
+                    var gr = gs.Get();
+                    if (gr == GetResult.Option) { if (gs.OptionIndex() == optGeoid) geoidKnown = geoid.CurrentValue != 0; continue; }
+                    if (gr == GetResult.String) { var s = gs.StringResult().Trim(); if (s.Length > 0) name = s; break; }
+                    if (gr == GetResult.Nothing) break;
+                    return Result.Cancel;
+                }
+                if (!geoidKnown)
+                {
+                    if (mode != RunMode.Interactive)
+                    {
+                        RhinoApp.WriteLine("Cesium ion: GeoidN is not set for this document — pass it as an option (GeoidN=48.7).");
+                        return Result.Cancel;
+                    }
+                    var gn = new GetNumber();   // no default: an Enter must not silently mean 0
+                    gn.SetCommandPrompt("Geoid undulation N at the site in metres (ellipsoid height − height above sea level, e.g. 48.7 in eastern Switzerland)");
+                    gn.SetLowerLimit(-120, false);
+                    gn.SetUpperLimit(120, false);
+                    gn.AcceptNothing(false);
+                    if (gn.Get() != GetResult.Number || gn.Number() == 0)
+                    {
+                        RhinoApp.WriteLine("Cesium ion: no geoid undulation given — upload cancelled.");
+                        return Result.Cancel;
+                    }
+                    geoid.CurrentValue = gn.Number();
+                }
+                double geoidN = geoid.CurrentValue;
+                doc.Strings.SetString("geobim", Shared.DocGeoidKey, geoidN.ToString("0.###", CultureInfo.InvariantCulture));
+
+                var dir = Path.Combine(Path.GetTempPath(), "geobim-rhino");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, Shared.Safe(name) + "_ion.ifc");
+                ExportResult res;
+                try { res = Shared.ExportIon(doc, objects, name, path); }
+                catch (Exception ex) { RhinoApp.WriteLine("Cesium ion: export failed — {0}", ex.Message); return Result.Failure; }
+                if (res.Elements == 0) { RhinoApp.WriteLine("Cesium ion: no geometry to upload."); return Result.Nothing; }
+
+                double height = res.IonElevation + geoidN;
+                if (!upload.CurrentValue)
+                {
+                    RhinoApp.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                        "Cesium ion: not uploaded (Upload=No). IFC written to {0} — origin lon {1:0.0000000}, lat {2:0.0000000}, {3:0.###} m ellipsoidal.",
+                        path, res.IonLon, res.IonLat, height));
+                    return Result.Success;
+                }
+                if (string.IsNullOrEmpty(p.IonToken))
+                {
+                    RhinoApp.WriteLine("Cesium ion: no access token yet. Create one at ion.cesium.com → Access Tokens (scopes assets:list, assets:read, assets:write), then run GeoBIMSettings → IonToken.");
+                    return Result.Cancel;
+                }
+                string description = string.Format(CultureInfo.InvariantCulture,
+                    "Uploaded from Rhino ({0}) with geoBIM.app for Rhino {1}. Origin at the Location {2:0.0000000}, {3:0.0000000}, " +
+                    "{4:0.###} m above sea level + geoid N {5:0.###} m = {6:0.###} m ellipsoidal.",
+                    Shared.DocName(doc), GeoBimPlugin.PluginVersion, res.IonLat, res.IonLon, res.IonElevation, geoidN, height);
+
+                uint docSerial = doc.RuntimeSerialNumber;
+                var client = new IonClient(p.IonToken);
+                RhinoApp.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                    "Cesium ion: uploading IFC {0:N1} MB as \"{1}\" — origin lon {2:0.0000000}, lat {3:0.0000000}, {4:0.###} m ellipsoidal…",
+                    new FileInfo(path).Length / 1048576.0, name, res.IonLon, res.IonLat, height));
+                Rhino.UI.StatusBar.ShowProgressMeter(docSerial, 0, 100, "Cesium ion upload", true, true);
+                started = true;
+                Task.Run(() => Run(client, path, name, description, res.IonLon, res.IonLat, height, docSerial));
+                return Result.Success;
+            }
+            finally
+            {
+                if (!started) Interlocked.Exchange(ref _busy, 0);
+            }
+        }
+
+        static async Task Run(IonClient client, string path, string name, string description, double lon, double lat, double height, uint docSerial)
+        {
+            int lastPct = -1;
+            var progress = new Progress<double>(f =>
+            {
+                int pct = (int)Math.Round(f * 100);
+                if (pct == lastPct) return;
+                lastPct = pct;
+                Shared.Ui(() => Rhino.UI.StatusBar.UpdateProgressMeter(docSerial, pct, true));
+            });
+            try
+            {
+                var asset = await client.CreateAsset(name, description, lon, lat, height).ConfigureAwait(false);
+                Shared.Ui(() =>
+                {
+                    RhinoDoc.FromRuntimeSerialNumber(docSerial)?.Strings.SetString("geobim", Shared.DocIonAssetKey, asset.Id.ToString(CultureInfo.InvariantCulture));
+                });
+                await IonClient.PutS3(asset.Upload, path, progress).ConfigureAwait(false);
+                await client.Complete(asset).ConfigureAwait(false);
+                Interlocked.Exchange(ref _busy, 0);
+                Shared.Ui(() =>
+                {
+                    Rhino.UI.StatusBar.HideProgressMeter(docSerial);
+                    RhinoApp.WriteLine("Cesium ion: uploaded as asset {0}, tiling on ion…", asset.Id);
+                });
+
+                string lastLine = null;
+                var deadline = DateTime.UtcNow.AddHours(3);
+                while (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(5000).ConfigureAwait(false);
+                    JsonElement st;
+                    try { st = await client.GetAsset(asset.Id).ConfigureAwait(false); }
+                    catch (Exception ex) when (!(ex is IonClient.ApiException)) { continue; }   // network hiccup: keep polling
+                    var status = st.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : "";
+                    if (status == "COMPLETE")
+                    {
+                        var url = IonClient.AssetUrl(asset.Id);
+                        Shared.Ui(() =>
+                        {
+                            RhinoApp.WriteLine("Cesium ion: ready — {0}", url);
+                            Shared.OpenUrl(url);
+                        });
+                        return;
+                    }
+                    if (status == "DATA_ERROR" || status == "ERROR")
+                    {
+                        Shared.Ui(() => RhinoApp.WriteLine("Cesium ion: tiling failed ({0}) — see {1}", status, IonClient.AssetUrl(asset.Id)));
+                        return;
+                    }
+                    string line = status == "IN_PROGRESS" && st.TryGetProperty("percentComplete", out var pc) && pc.ValueKind == JsonValueKind.Number
+                        ? $"tiling — {pc.GetDouble():0}%" : "waiting (" + status + ")";
+                    if (line != lastLine)
+                    {
+                        lastLine = line;
+                        Shared.Ui(() => RhinoApp.WriteLine("Cesium ion: {0}", line));
+                    }
+                }
+                Shared.Ui(() => RhinoApp.WriteLine("Cesium ion: still tiling after 3 hours — check {0}", IonClient.AssetUrl(asset.Id)));
+            }
+            catch (Exception ex)
+            {
+                Shared.Ui(() =>
+                {
+                    Rhino.UI.StatusBar.HideProgressMeter(docSerial);
+                    RhinoApp.WriteLine("Cesium ion: upload failed — {0}", ex.Message);
+                });
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _busy, 0);
+            }
+        }
     }
 
     // ------------------------------------------------------------------

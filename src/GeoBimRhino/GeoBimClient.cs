@@ -137,8 +137,8 @@ namespace GeoBimRhino
 
         public string ModelUrl(string slug) => _server + "/?model=" + Uri.EscapeDataString(slug);
 
-        /// <summary>Upload body that reports how much has been sent (0–1)</summary>
-        class ProgressStreamContent : HttpContent
+        /// <summary>Upload body that reports how much has been sent (0–1); has a Content-Length (no chunking)</summary>
+        internal class ProgressStreamContent : HttpContent
         {
             readonly Stream _stream;
             readonly IProgress<double> _progress;

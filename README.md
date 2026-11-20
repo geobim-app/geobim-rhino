@@ -34,8 +34,9 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 | `GeoBIMExportGlb` | Writes the GLB only (`-GeoBIMExportGlb` likewise) and prints the placement it would send. |
 | `GeoBIMOpen` | Opens the document's model (or the server) in the browser. |
 | `GeoBIMMapOrigin` | Map coordinates E,N[,H[,rotation]] of the model origin for models drawn in local coordinates (see *Georeferencing*); `Clear` removes them. Scripted: `-GeoBIMMapOrigin 2755000,1206000,0,0`. |
-| `GeoBIMSettings` | Server, token, EPSG, connection test. |
-| `GeoBIMToolbar` | Shows the geoBIM.app toolbar (Upload, Open, Export IFC, Settings). |
+| `GeoBIMUploadIon` | Uploads the selection to **Cesium ion** as a new 3D Tiles asset (see below). |
+| `GeoBIMSettings` | Server, token, EPSG, connection test; `IonToken` / `IonTest` for Cesium ion. |
+| `GeoBIMToolbar` | Shows the geoBIM.app toolbar: Upload, Cesium ion (right click: ion token), Open, Export IFC, Map origin, Settings. |
 
 ## GLB instead of IFC
 
@@ -52,6 +53,27 @@ properties: `GeoBIMUpload` → *Format = GLB* (needs a geoBIM.app with GLB uploa
   above sea level (the server adds the geoid: GCG2016 in Germany, EGM2008 elsewhere) and model north
   as heading. Without a Location geoBIM.app places it at the centre of the view; models in map
   coordinates need *Format = IFC*.
+
+## Cesium ion
+
+`GeoBIMUploadIon` sends the selection to your own [Cesium ion](https://ion.cesium.com) account, where
+ion's BIM/CAD tiler turns it into a 3D Tiles asset.
+
+- **Token**: ion.cesium.com → *Access Tokens* → *Create token* with the scopes `assets:list`,
+  `assets:read` and `assets:write`; then **right-click the Cesium ion button** in the toolbar (or
+  `GeoBIMSettings` → `IonToken`) and paste it into the dialog (hidden field) — the connection and
+  the write permission are tested right away. Without `assets:write` ion refuses uploads with a
+  misleading `404 ResourceNotFound`; the plugin says what is missing. A Cesium ion token pasted
+  into `Token` (the geoBIM.app plugin token) is recognised and stored as ion token.
+- **Placement** from the *Location* (EarthAnchorPoint), which is required: the IFC is written in
+  east/north/up metres around the model base point (model north turned to +Y), and ion puts its
+  origin at the Location's longitude/latitude.
+- **Height**: ion works with heights above the ellipsoid, Rhino's Location with heights above sea
+  level. `GeoidN` (asked once, remembered in the document) is the geoid undulation at the site,
+  e.g. about 48.7 m in eastern Switzerland; the origin goes to *elevation + GeoidN*.
+- **Every upload is a new asset** (ion has no replace); the command prints the asset id, follows
+  the tiling and opens the asset page. Delete old assets in ion yourself.
+- Scripted: `_-GeoBIMUploadIon _Enter GeoidN=48.7 "Asset name"`.
 
 ## What ends up in the IFC
 
@@ -105,11 +127,17 @@ dotnet build src/GeoBimRhino/GeoBimRhino.csproj -c Release
 → src/GeoBimRhino/bin/Release/net7.0/GeoBimRhino.rhp
 ```
 
+Package for the Rhino Package Manager (Yak, Windows): `python tools/make_yak.py` builds and writes
+`dist/geobim-<version>-rh8_0-win.yak` (manifest and icon in `tools/yak/`). It does not push; try a
+package on `https://test.yak.rhino3d.com` first, because a version pushed to the public server
+cannot be replaced.
+
 ## Test
 
 `tests/make_test_models.py` builds the same small model in six cases (UTM map coordinates,
 EarthAnchorPoint, no georeferencing, LV95 map coordinates, local with a map origin, local with a
-rotated map origin) inside Rhino and exports each with `-GeoBIMExportIfc`:
+rotated map origin) inside Rhino and exports each with `-GeoBIMExportIfc`, plus the Cesium ion IFC
+of the EarthAnchorPoint case (`-GeoBIMUploadIon … Upload=No`, nothing is sent):
 
 ```
 "C:\Program Files\Rhino 8\System\Rhino.exe" /nosplash /runscript="_-RunPythonScript ""<repo>\tests\make_test_models.py"""

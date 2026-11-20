@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Checks src/GeoBimRhino/AwsSigV4.cs against AWS's published S3 examples.
+       Run: dotnet run, with the project folder tests/sigv4_check -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\GeoBimRhino\AwsSigV4.cs" Link="AwsSigV4.cs" />
+  </ItemGroup>
+</Project>

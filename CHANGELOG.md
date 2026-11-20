@@ -20,6 +20,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   coordinates of the map-origin cases with the model in real LV95 coordinates.
 - **`CLAUDE.md`**: build and test commands, source map, where settings live, code rules and rules for
   operating Rhino for someone (after EarthLink's agent guide).
+- **Cesium ion upload** (`IonClient.cs`, `AwsSigV4.cs`, `Commands.cs`, `ModelExport.cs`): new command
+  `GeoBIMUploadIon` creates a 3D Tiles asset (`sourceType` `BIM_CAD`, as lab.geobim.app's
+  `uploadToIon`), uploads the IFC to ion's S3 location (own AWS Signature V4, no AWS SDK), completes
+  the upload and follows the tiling until the asset is ready. The IFC is written in east/north/up
+  metres around the EarthAnchorPoint (model north turned to +Y, no heading needed); the origin goes
+  to the Location's lon/lat at the elevation plus the document's geoid undulation `GeoidN`.
+  `GeoBIMSettings` gains `IonToken` and `IonTest`. `tests/sigv4_check` checks the signature against
+  AWS's published S3 examples (`dotnet run`, both pass); `tests/make_test_models.py` writes the ion
+  IFC of the EarthAnchorPoint case (`Upload=No`) and `check_exports.py` checks it.
+  - **Write permission**: `IonTest` checks it without creating anything (an empty `POST /v1/assets`).
+    Ion answers writes of a token without `assets:write` with `404 ResourceNotFound`
+    (`/v1/assets?assetRegion=us-east-1`), not 403 — seen on 2026-11-19 with a read-only token; upload
+    errors of that kind say that the token lacks `assets:write`.
+  - **S3 region from ion**: ion sends the account's storage region with the upload location
+    (`region`, e.g. `eu-west-1` with bucket `cesiumion-assets-production-eu-west-1`) and the upload is
+    signed for it. If S3 names another region anyway, the upload is retried once there.
+  - **GeoidN 0 counts as not set**, and the question has no default (an Enter on `<0>` would put the
+    model 48.7 m too low at the Taminabrücke).
+  - Checked end-to-end on 2026-11-19: Taminabrücke uploaded to Cesium ion (EU account), tiled with
+    the BIM/CAD tiler in about 4 minutes; tileset transform exactly at the Location, bridge centre
+    0.13 m / 0.08 m from the LV95 position computed with pyproj.
+- **Toolbar with six buttons** (`tools/make_rui.py`, new `tools/make_icons.py`, `tools/icons/`): Upload,
+  **Cesium ion** (right click: set the ion token), Open, Export IFC, **Map origin**, Settings. Icons are
+  Lucide SVGs (ISC, lucide-static 0.460.0, kept in `tools/icons/`) rendered with PyMuPDF in the brand
+  colour; button GUIDs stay derived from fixed names, so Rhino keeps treating it as the same toolbar.
+- **Package for the Rhino Package Manager** (`tools/make_yak.py`, `tools/yak/`): builds the plugin and
+  writes `dist/geobim-<version>-rh8_0-win.yak` (Windows, Rhino 8) with the `.rhp`, `.rui`, icon,
+  licence and manifest. It never pushes.
 - **GLB upload** (`GlbWriter.cs`, `Commands.cs`, `GeoBimClient.cs`, `ModelExport.cs`): `GeoBIMUpload`
   has *Format = IFC/GLB* (remembered per document; IFC and GLB are separate models with their own
   replace link). GLB is written by the plugin (binary glTF 2.0, Y-up, one node per object, vertex
@@ -30,6 +58,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the format used last. Tested in Rhino 8 with `examples/upload_knot_glb.py`: GLB checked with
   trimesh (PBR metallic 1 / roughness 0.05, normals, bounds), uploaded to beta, placed at Cloud Gate
   (41.882684, −87.623328, 180 m above sea level → 145.99 m ellipsoidal).
+
+### Changed
+
+- **Tokens can no longer be mixed up**: a Cesium ion token pasted into `GeoBIMSettings → Token` is
+  recognised (JWT, `eyJ…`) and stored as the ion token; a `gbp_…` token pasted into `IonToken` is
+  refused with a hint. Saving the ion token runs `IonTest` at once.
+- **Tokens are entered in a dialog with a hidden field** (interactive `GeoBIMSettings`): Rhino's
+  command line echoed pasted tokens into the command history. Scripted `-GeoBIMSettings` still reads
+  them from the command line.
 
 ## [0.2.0] — 2026-11-13
 

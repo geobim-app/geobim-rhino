@@ -89,6 +89,13 @@ namespace GeoBimRhino
             set => Settings.SetString("token", (value ?? "").Trim());
         }
 
+        /// <summary>Cesium ion access token (scopes assets:list, assets:read, assets:write)</summary>
+        public string IonToken
+        {
+            get => Settings.GetString("ionToken", "");
+            set => Settings.SetString("ionToken", (value ?? "").Trim());
+        }
+
         /// <summary>"auto" or an EPSG code such as "25832"</summary>
         public string Epsg
         {

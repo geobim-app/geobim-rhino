@@ -24,6 +24,9 @@ namespace GeoBimRhino
         public string GeoRefInfo = "";
         public string Epsg;          // EPSG code written into IfcMapConversion, else null
         public bool Cancelled;       // the user cancelled the CRS question
+        // Cesium ion export: WGS84 position of the IFC origin (the model base point)
+        // and its height from the EarthAnchorPoint (above sea level, no geoid yet)
+        public double IonLon, IonLat, IonElevation;
     }
 
     /// <summary>
@@ -54,8 +57,11 @@ namespace GeoBimRhino
 
         /// <param name="resolveEpsg">EPSG for map coordinates (easting, northing of the model centre in metres); null cancels</param>
         /// <param name="mapOrigin">map origin of local coordinates (the document's, see MapOrigin), or null to ignore it</param>
+        /// <param name="ionFrame">Cesium ion: geometry in east/north/up metres around the EarthAnchorPoint's
+        /// base point (model north turned to +Y, as EarthLink exports), no georeferencing in the IFC itself;
+        /// the position travels separately (IonLon/IonLat/IonElevation). Needs a Location.</param>
         public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, Func<double, double, int?> resolveEpsg,
-                                         MapOrigin mapOrigin = null)
+                                         MapOrigin mapOrigin = null, bool ionFrame = false)
         {
             var res = new ExportResult();
             var model = new IfcModelData
@@ -82,7 +88,25 @@ namespace GeoBimRhino
             Point3d origin;
             var anchor = doc.EarthAnchorPoint;
             bool inMapCoords = CrsDetect.LooksLikeMap(cx, cy);
-            if (mapOrigin != null && !inMapCoords)
+            var rotate = Transform.Identity;
+            if (ionFrame)
+            {
+                if (anchor == null || !anchor.EarthLocationIsSet())
+                    throw new InvalidOperationException("Cesium ion needs a Location (EarthAnchorPoint) — set it with the EarthAnchorPoint command");
+                origin = anchor.ModelBasePoint;
+                // turn model north onto +Y (east/north/up), so ion needs no heading
+                var n = anchor.ModelNorth;
+                n.Z = 0;
+                double north = n.Unitize() ? Math.Atan2(-n.X, n.Y) : 0;
+                rotate = Transform.Rotation(-north, Vector3d.ZAxis, Point3d.Origin);
+                res.IonLat = anchor.EarthBasepointLatitude;
+                res.IonLon = anchor.EarthBasepointLongitude;
+                res.IonElevation = anchor.EarthBasepointElevation;
+                res.GeoRefInfo = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "east/north/up around the Location {0:0.000000}, {1:0.000000}, {2:0.##} m (model north {3:0.###}° clockwise from +Y)",
+                    res.IonLat, res.IonLon, res.IonElevation, -north * 180.0 / Math.PI);
+            }
+            else if (mapOrigin != null && !inMapCoords)
             {
                 // Local coordinates + stored map origin: the geometry stays as it is
                 mapOrigin.ToMap(cx, cy, out double me, out double mn);
@@ -134,7 +158,7 @@ namespace GeoBimRhino
                 res.GeoRefInfo = "no georeferencing — place the model in geoBIM.app and save its position";
             }
 
-            var toIfc = Transform.Scale(Point3d.Origin, scale) * Transform.Translation(-(Vector3d)origin);
+            var toIfc = Transform.Scale(Point3d.Origin, scale) * rotate * Transform.Translation(-(Vector3d)origin);
             var mp = doc.GetCurrentMeshingParameters() ?? MeshingParameters.QualityRenderMesh;
 
             foreach (var it in items)

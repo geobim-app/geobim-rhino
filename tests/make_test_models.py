@@ -98,6 +98,22 @@ def build(doc, offset, case):
                          attrs(doc, "Achsen", C.Black))
 
 
+def run_ion_case():
+    """Cesium ion IFC without uploading: the anchor model, written by GeoBIMUploadIon Upload=No"""
+    doc = sc.doc
+    tmp = os.path.join(System.IO.Path.GetTempPath(), "geobim-rhino", "ion_ion.ifc")
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    doc.Strings.Delete("geobim", "mapOrigin")
+    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMUploadIon _Enter GeoidN=47.5 Upload=No "ion"', False)
+    dst = os.path.join(OUT, "ion.ifc")
+    if os.path.exists(dst):
+        os.remove(dst)
+    if os.path.exists(tmp):
+        os.replace(tmp, dst)
+    log("ion: RunScript=%s, ifc exists=%s" % (ok, os.path.exists(dst)))
+
+
 def run_case(name, offset, anchor, map_origin=None):
     doc = sc.doc
     doc.Objects.Clear()
@@ -134,6 +150,7 @@ try:
     sc.doc.AdjustModelUnitSystem(Rhino.UnitSystem.Meters, False)
     run_case("utm", rg.Vector3d(373000, 5615000, 60), False)
     run_case("anchor", rg.Vector3d.Zero, True)
+    run_ion_case()   # same document as "anchor"
     run_case("local", rg.Vector3d(250, -40, 0), False)
     # Swiss LV95: the same model once in real map coordinates, once local with a
     # map origin (must give the same absolute coordinates), once with a rotation

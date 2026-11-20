@@ -8,8 +8,11 @@
 #   origin     the same model in local coordinates + map origin 2600000,1200000,0,0
 #   origin_rot local + map origin 2600000,1200000,400 rotated 30° (and an EarthAnchorPoint,
 #              which the map origin must win over)
+#   ion        the anchor model as GeoBIMUploadIon writes it (east/north/up, model north
+#              turned onto +Y; written with Upload=No, nothing is sent)
 # lv95 and origin must give the same absolute coordinates; origin_rot must be
-# origin's local geometry turned 30° about the map origin. Exit code 1 on failure.
+# origin's local geometry turned 30° about the map origin; ion must be anchor's
+# geometry turned 30° onto true north. Exit code 1 on failure.
 
 import math
 import os
@@ -21,7 +24,7 @@ import ifcopenshell.validate
 import numpy as np
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
-CASES = ["utm", "anchor", "local", "lv95", "origin", "origin_rot"]
+CASES = ["utm", "anchor", "ion", "local", "lv95", "origin", "origin_rot"]
 TOL = 2e-5   # the writer rounds vertices to 5 decimals
 
 failures = []
@@ -144,6 +147,26 @@ if "origin" in files and "origin_rot" in files:
         worst = max(worst, np.abs(np.sort(exp, axis=0) - np.sort(got, axis=0)).max())
     # both files are rounded to 5 decimals before the rotation: allow two roundings
     check(same and worst < 2.5 * TOL, f"origin_rot = origin turned 30° about the map origin (max difference {worst:.2e} m)")
+
+if "anchor" in files and "ion" in files:
+    # ion: the anchor model in east/north/up around the base point; model north was
+    # 30° clockwise from +Y, so the geometry is turned 30° counter-clockwise
+    fi = files["ion"]
+    north = fi.by_type("IfcGeometricRepresentationContext")[0].TrueNorth
+    check(georef(fi) is None and fi.by_type("IfcSite")[0].RefLatitude is None,
+          "ion: no MapConversion and no IfcSite lat/lon (the position travels with the upload)")
+    check(north is None or tuple(round(v, 9) for v in north.DirectionRatios) == (0.0, 1.0), "ion: TrueNorth (0,1)")
+    A = sorted(local_vertices(files["anchor"]), key=lambda t: t[0])
+    B = sorted(local_vertices(fi), key=lambda t: t[0])
+    c, s = math.cos(math.radians(30)), math.sin(math.radians(30))
+    worst, same = 0.0, len(A) == len(B)
+    for (na, _, pa), (nb, _, pb) in zip(A, B):
+        if na != nb or pa.shape != pb.shape:
+            same = False
+            continue
+        exp = np.column_stack([c * pa[:, 0] - s * pa[:, 1], s * pa[:, 0] + c * pa[:, 1], pa[:, 2]])
+        worst = max(worst, np.abs(np.sort(exp, axis=0) - np.sort(pb, axis=0)).max())
+    check(same and worst < TOL, f"ion = anchor model turned onto true north (max difference {worst:.2e} m)")
 
 print()
 print("all checks passed" if not failures else f"{len(failures)} check(s) failed")

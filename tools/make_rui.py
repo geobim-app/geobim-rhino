@@ -1,15 +1,16 @@
 # geoBIM.app for Rhino — builds src/GeoBimRhino/GeoBimRhino.rui
 #
-# One toolbar "geoBIM.app" (in its own toolbar group) with four buttons:
-# Upload, Open in browser, Export IFC, Settings. Icons: Lucide (ISC license)
-# rendered in the brand colour #2ECFB0 as PNG strips in Resources/
-# (toolbar-16/24/32.png, one icon per 16/24/32 px, same order as BUTTONS).
+# One toolbar "geoBIM.app" (in its own toolbar group) with six buttons:
+# Upload, Cesium ion (right click: ion token), Open in browser, Export IFC,
+# Map origin, Settings. Icons: Lucide (ISC license, SVGs in tools/icons/)
+# rendered in the brand colour #2ECFB0 by tools/make_icons.py as PNG strips in
+# Resources/ (toolbar-16/24/32.png, one icon per 16/24/32 px, same order as BUTTONS).
 # Layout as in Rhino 8's own default.rui (format 5): the bitmap_item entries
 # sit inside every bitmap size, active_tool_bar_group is the id of the toolbar
 # shown first. GUIDs are derived from fixed names, so a rebuilt file keeps
 # its ids and Rhino treats it as the same toolbar.
 #
-#   python tools/make_rui.py
+#   python tools/make_icons.py && python tools/make_rui.py
 
 import base64
 import os
@@ -22,12 +23,26 @@ NS = uuid.UUID("2629d057-640c-483e-996d-942ddc6eb616")   # plugin guid as namesp
 NL = "\n"
 
 BUTTONS = [
-    # (key, label, tooltip, macro)
-    ("upload", "Upload", "Upload to geoBIM.app: selected objects, or all visible ones", "! _GeoBIMUpload"),
-    ("open", "Open", "Open this model in geoBIM.app", "! _GeoBIMOpen"),
-    ("export", "Export IFC", "Export the selection as IFC 4 for geoBIM.app", "! _GeoBIMExportIfc"),
-    ("settings", "Settings", "geoBIM.app settings: server, plugin token, EPSG", "! _GeoBIMSettings"),
+    # (key, label, tooltip, macro, Lucide icon, optional right click: (label, tooltip, macro))
+    ("upload", "Upload", "Upload to geoBIM.app: selected objects, or all visible ones", "! _GeoBIMUpload", "cloud-upload", None),
+    ("ion", "Cesium ion", "Upload to Cesium ion: selected objects, or all visible ones (needs a Location)",
+     "! _GeoBIMUploadIon", "earth",
+     ("Cesium ion token", "Set the Cesium ion access token (scopes assets:list, assets:read, assets:write)",
+      "! _GeoBIMSettings _IonToken")),
+    ("open", "Open", "Open this model in geoBIM.app", "! _GeoBIMOpen", "globe", None),
+    ("export", "Export IFC", "Export the selection as IFC 4 for geoBIM.app", "! _GeoBIMExportIfc", "file-down", None),
+    ("origin", "Map origin", "Map coordinates of the model origin for local coordinates (E, N, H, rotation)",
+     "! _GeoBIMMapOrigin", "locate-fixed", None),
+    ("settings", "Settings", "Settings: geoBIM.app server and plugin token, EPSG, Cesium ion token", "! _GeoBIMSettings", "settings", None),
 ]
+
+
+def macros():
+    """(macro key, label, tooltip, script) for every left and right click"""
+    for key, label, tip, macro, icon, right in BUTTONS:
+        yield key, label, tip, macro
+        if right:
+            yield key + "-right", right[0], right[1], right[2]
 
 
 def gid(name):
@@ -66,22 +81,24 @@ def build():
     o.append("      </tool_bar_group_item>" + NL)
     o.append('      <dock_bar_info dpi_scale="100" dock_bar="False" docking="True" horz="True" visible="True" '
              'floating="True" mru_float_style="8192" bar_id="59500" mru_width="1" point_pos="400,200" '
-             'float_point="400,200" dock_location_u="59419" dock_location="top" float_size="180,44" />' + NL)
+             'float_point="400,200" dock_location_u="59419" dock_location="top" float_size="260,44" />' + NL)
     o.append("    </tool_bar_group>" + NL)
     o.append("  </tool_bar_groups>" + NL)
     o.append("  <tool_bars>" + NL)
     o.append('    <tool_bar guid="%s" bitmap_id="%s">' % (bar_id, gid("bmp-upload")) + NL)
     o.append(text("text", "geoBIM.app", 6))
-    for key, label, tip, macro in BUTTONS:
+    for key, label, tip, macro, icon, right in BUTTONS:
         o.append('      <tool_bar_item guid="%s">' % gid("item-" + key) + NL)
         o.append(text("text", label, 8))
         o.append("        <left_macro_id>%s</left_macro_id>" % gid("macro-" + key) + NL)
+        if right:
+            o.append("        <right_macro_id>%s</right_macro_id>" % gid("macro-" + key + "-right") + NL)
         o.append("      </tool_bar_item>" + NL)
     o.append("    </tool_bar>" + NL)
     o.append("  </tool_bars>" + NL)
     o.append("  <macros>" + NL)
-    for key, label, tip, macro in BUTTONS:
-        o.append('    <macro_item guid="%s" bitmap_id="%s">' % (gid("macro-" + key), gid("bmp-" + key)) + NL)
+    for key, label, tip, macro in macros():
+        o.append('    <macro_item guid="%s" bitmap_id="%s">' % (gid("macro-" + key), gid("bmp-" + key.replace("-right", ""))) + NL)
         o.append(text("text", "geoBIM.app " + label, 6))
         o.append(text("tooltip", tip, 6))
         o.append(text("help_text", tip, 6))
@@ -93,7 +110,7 @@ def build():
     o.append("  <bitmaps>" + NL)
     for tag, size in (("small_bitmap", 16), ("normal_bitmap", 24), ("large_bitmap", 32)):
         o.append('    <%s item_width="%d" item_height="%d">' % (tag, size, size) + NL)
-        for i, (key, label, tip, macro) in enumerate(BUTTONS):
+        for i, (key, label, tip, macro, icon, right) in enumerate(BUTTONS):
             o.append('      <bitmap_item guid="%s" index="%d" />' % (gid("bmp-" + key), i) + NL)
         o.append("      <bitmap>%s</bitmap>" % b64("toolbar-%d.png" % size) + NL)
         o.append("    </%s>" % tag + NL)
