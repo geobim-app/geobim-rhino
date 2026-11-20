@@ -53,6 +53,7 @@ namespace GeoBimRhino
             if (!osm.IsFaulted) res.Hits.AddRange(osm.Result);
             if (ch.IsFaulted) res.Note = "swisstopo did not answer (" + Message(ch.Exception) + "), only OpenStreetMap was searched";
             else if (osm.IsFaulted) res.Note = "OpenStreetMap did not answer (" + Message(osm.Exception) + "), only Switzerland was searched";
+            else if (Nominatim.SwitchedOff) res.Note = "the OpenStreetMap search is switched off for now, only Switzerland was searched";
             return res;
         }
 
@@ -62,13 +63,69 @@ namespace GeoBimRhino
     /// <summary>
     /// OpenStreetMap's Nominatim (nominatim.openstreetmap.org), used as its usage policy asks: an
     /// application User-Agent, at most one request per second, no search while typing (only on
-    /// Enter), results cached, "© OpenStreetMap contributors" shown with the hits. Hits in
+    /// Enter), results cached, "© OpenStreetMap contributors" shown with the hits, and a switch
+    /// that works without a software update: the service comes from
+    /// https://viewer.geobim.app/plugin/rhino.json ("nominatim": URL, or null for off), read at
+    /// most once an hour; when that file cannot be read the built-in URL is used. Hits in
     /// Switzerland and Liechtenstein are dropped (swisstopo has them, with LV95 coordinates).
     /// </summary>
     public static class Nominatim
     {
         public const string Attribution = "© OpenStreetMap contributors (Nominatim)";
-        const string Url = "https://nominatim.openstreetmap.org/search";
+        public const string ConfigUrl = "https://viewer.geobim.app/plugin/rhino.json";
+        const string DefaultUrl = "https://nominatim.openstreetmap.org/search";
+        static string _url = DefaultUrl;
+        static DateTime _configRead = DateTime.MinValue;
+
+        /// <summary>True when the switch file turned the search off</summary>
+        public static bool SwitchedOff { get; private set; }
+
+        /// <summary>The search URL from the switch file (null = off), refreshed at most once an hour</summary>
+        static async Task<string> Endpoint()
+        {
+            if (DateTime.UtcNow - _configRead < TimeSpan.FromHours(1)) return SwitchedOff ? null : _url;
+            try
+            {
+                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                using (var resp = await Http.GetAsync(ConfigUrl, cts.Token).ConfigureAwait(false))
+                {
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        var (url, off) = ParseConfig(await resp.Content.ReadAsStringAsync().ConfigureAwait(false));
+                        if (off) { SwitchedOff = true; _url = null; }
+                        else if (url != null) { SwitchedOff = false; _url = url; }
+                        _configRead = DateTime.UtcNow;
+                    }
+                }
+            }
+            catch
+            {
+                // switch file not reachable: keep the last known setting (at first the built-in URL)
+            }
+            return SwitchedOff ? null : _url;
+        }
+
+        /// <summary>The switch file → (search URL, switched off); an https URL or null/"" for off, anything else keeps the setting</summary>
+        public static (string Url, bool Off) ParseConfig(string json)
+        {
+            try
+            {
+                using (var doc = JsonDocument.Parse(json))
+                {
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("nominatim", out var n))
+                        return (null, false);
+                    if (n.ValueKind == JsonValueKind.Null) return (null, true);
+                    if (n.ValueKind != JsonValueKind.String) return (null, false);
+                    var url = n.GetString()?.Trim() ?? "";
+                    if (url.Length == 0) return (null, true);
+                    return url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? (url, false) : (null, false);
+                }
+            }
+            catch (JsonException)
+            {
+                return (null, false);
+            }
+        }
         static readonly HttpClient Http = CreateClient();
         static readonly SemaphoreSlim Gate = new SemaphoreSlim(1, 1);
         static readonly Dictionary<string, List<Place>> Cache = new Dictionary<string, List<Place>>(StringComparer.OrdinalIgnoreCase);
@@ -89,10 +146,12 @@ namespace GeoBimRhino
             try
             {
                 if (Cache.TryGetValue(text, out var cached)) return new List<Place>(cached);
+                var endpoint = await Endpoint().ConfigureAwait(false);
+                if (endpoint == null) return new List<Place>();
                 var wait = _last.AddMilliseconds(1100) - DateTime.UtcNow;
                 if (wait > TimeSpan.Zero) await Task.Delay(wait).ConfigureAwait(false);
                 string lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
-                var url = $"{Url}?q={Uri.EscapeDataString(text)}&format=jsonv2&addressdetails=1&limit={limit}" +
+                var url = $"{endpoint}?q={Uri.EscapeDataString(text)}&format=jsonv2&addressdetails=1&limit={limit}" +
                           (lang.Length == 2 ? "&accept-language=" + lang : "");
                 string json;
                 try { json = await Http.GetStringAsync(url).ConfigureAwait(false); }

@@ -76,8 +76,9 @@ the map origin and Rhino's Location from one input, so all formats agree; export
   | `geoidN` | the document's own geoid undulation for Cesium ion (absent: from `Geoid.cs`) |
   | `ionasset` | last Cesium ion asset id |
 
-- **Per user:** `PlugIn.Settings` (`GeoBimPlugin.cs`). Keys: `server`, `token`, `epsg`, `defaultUtmEpsg`, `ionToken`,
-  `toolbarShown`.
+- **Per user:** `PlugIn.Settings` (`GeoBimPlugin.cs`). Keys: `server`, `token|<server>` (one plugin token per
+  server; a single `token` of earlier versions moves to the server set at the first read), `epsg`,
+  `defaultUtmEpsg`, `ionToken`, `toolbarShown`.
 
 ## Code rules
 
@@ -93,9 +94,12 @@ the map origin and Rhino's Location from one input, so all formats agree; export
   `.rui`).
 - **External services besides the upload targets** are called only on the user's action: swisstopo's search and
   height service (`GeoAdmin.cs`) and OpenStreetMap's Nominatim (`Places.cs`) when they search an address or pick on
-  the map; the map window loads Leaflet from unpkg (version and SRI hash pinned) and tiles from swisstopo and BKG.
+  the map; the map window loads Leaflet from unpkg (version and SRI hash pinned), tiles from swisstopo and BKG, and
+  after a pick the Mapterhorn terrain tile of the point (decoded in the page, which reports the height through
+  `document.title`).
   Keep to Nominatim's usage policy: the plugin's User-Agent, at most one request per second, no search-as-you-type,
-  cache, attribution.
+  cache, attribution, and the switch without an update (`plugin/rhino.json` in the geobim server repo, served as
+  `https://viewer.geobim.app/plugin/rhino.json`: `"nominatim"` URL or `null` for off).
 - **Compatibility:**
   - Keep the plugin GUID and the command GUIDs. Rhino and the Package Manager identify the plugin by them.
   - New commands get a new GUID.

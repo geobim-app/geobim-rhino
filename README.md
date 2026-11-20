@@ -42,6 +42,8 @@ way round.
    (`gbp_…`, shown only once). A token can only upload and convert models; revoke it there.
 2. In Rhino: `GeoBIMSettings` → **Token** → paste → **Test**.
    - **Live** = https://viewer.geobim.app (default), **Beta** = https://beta.geobim.app, **Server** = custom.
+   - A token works only on the site that created it. The plugin keeps one token per server, so switching between
+     **Live** and **Beta** needs no new input; choose the server first, then **Token**.
    - **EPSG**: `auto` (default) or a fixed code for models drawn in map coordinates.
    - **DefaultUTM**: EPSG used for UTM coordinates without zone prefix (default 25832).
 
@@ -49,7 +51,7 @@ way round.
 
 | Command | What it does |
 |---|---|
-| `GeoBIMUpload` | Select objects (Enter = all visible) → name → IFC → upload with progress → follows the conversion in the command line → opens the model in the browser. The document remembers the model: the next upload **replaces** it (same link); choose *Model = New* for a separate one. *Format = GLB* uploads a GLB instead (see below); the document remembers the format, IFC and GLB are separate models. |
+| `GeoBIMUpload` | Select objects (Enter = all visible) → name → IFC → upload with progress → follows the conversion in the command line → opens the model in the browser. The document remembers the model: the next upload **replaces** it (same link); choose *Model = New* for a separate one. *Format = GLB* uploads a GLB instead (see below); the document remembers the format, IFC and GLB are separate models. A selection smaller than 25 cm or larger than 50 km (almost always wrong document units, e.g. a 5 m cube drawn as 5 in millimetres) gets a warning and the question whether to upload it anyway. |
 | `GeoBIMExportIfc` | Writes the IFC only (`-GeoBIMExportIfc` takes the file name on the command line, for scripts). |
 | `GeoBIMExportGlb` | Writes the GLB only (`-GeoBIMExportGlb` likewise) and prints the placement it would send. |
 | `GeoBIMOpen` | Opens the document's model (or the server) in the browser. |
@@ -72,8 +74,10 @@ way round.
      Nominatim elsewhere; pick from the list;
    - **Map**: click the point on a map (swisstopo's map and aerial images, BKG TopPlusOpen elsewhere, search box);
      the model's outline follows the marker.
-3. **The height** of that point above sea level. Enter keeps the model's z values as heights above sea level;
-   after a search or a map click `Terrain` takes swisstopo's terrain height.
+3. **The height** of that point above sea level. After a search or a map click Enter puts the point on the terrain
+   (swisstopo in Switzerland, Mapterhorn elsewhere); otherwise Enter keeps the current height while the point stays
+   within 1 km. `ModelHeights` keeps the model's z values as heights above sea level. Without a known height there
+   is no default.
 4. **Map north** in degrees clockwise from +Y (Enter: +Y is north); `TwoPoints` picks a line pointing north.
 
 The plugin stores the map origin (the IFC gets `IfcMapConversion`) and sets Rhino's **Location** to the same place,
@@ -88,8 +92,8 @@ work for the IFC via the map origin; GLB and Cesium ion then need Rhino's Locati
 Cesium ion are placed from it too (LV95, UTM).
 
 Network: the address search asks swisstopo's geo.admin.ch API and OpenStreetMap's Nominatim, `Terrain` asks
-swisstopo; the map window loads Leaflet from unpkg and map tiles from swisstopo and BKG. Typed coordinates are
-converted offline.
+swisstopo; the map window loads Leaflet from unpkg, map tiles from swisstopo and BKG, and after a click the
+Mapterhorn terrain tile of the point. Typed coordinates are converted offline.
 
 **Full reference:** [docs/GeoBIMLocation.md](docs/GeoBIMLocation.md): all prompts and input formats, how the
 coordinate system, height and map north are chosen, what is stored, scripting, messages and accuracy.

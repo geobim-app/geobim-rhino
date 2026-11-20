@@ -157,6 +157,33 @@ namespace GeoBimRhino
             return res;
         }
 
+        /// <summary>
+        /// A model of a few centimetres or of more than 50 km is almost always drawn in other units than the
+        /// document has (a 5 m cube drawn as 5 in a millimetre document is 5 mm): the warning, else null
+        /// </summary>
+        public static string SizeWarning(RhinoDoc doc, ExportResult res)
+        {
+            if (res == null || res.Elements == 0) return null;
+            double m = res.ExtentMetres;
+            if (m >= 0.25 && m <= 50000) return null;
+            string size = m < 1 ? string.Format(CultureInfo.InvariantCulture, "only {0:0.###} mm", m * 1000)
+                                : string.Format(CultureInfo.InvariantCulture, "{0:0.#} km", m / 1000);
+            return string.Format("geoBIM.app: the selection is {0} across, and the document is in {1} — check the units " +
+                                 "(Document Properties → Units: change them and let Rhino scale the objects, or scale them yourself).",
+                                 size, doc.ModelUnitSystem);
+        }
+
+        /// <summary>The units check before an upload: interactive it asks (default No), scripted it only warns</summary>
+        public static bool ConfirmSize(RhinoDoc doc, ExportResult res, RunMode mode)
+        {
+            var warn = SizeWarning(doc, res);
+            if (warn == null) return true;
+            RhinoApp.WriteLine(warn);
+            if (mode != RunMode.Interactive) return true;
+            bool go = false;
+            return RhinoGet.GetBool("Upload it anyway?", true, "No", "Yes", ref go) == Result.Success && go;
+        }
+
         /// <summary>IFC for Cesium ion: east/north/up around the model's position, which goes to IonLon/IonLat/IonElevation</summary>
         public static ExportResult ExportIon(RhinoDoc doc, List<RhinoObject> objects, string name, string path)
         {
@@ -222,13 +249,19 @@ namespace GeoBimRhino
                     }
                     p.Server = s;
                 }
-                else if (idx == oLive) p.Server = GeoBimPlugin.DefaultServer;
-                else if (idx == oBeta) p.Server = "https://beta.geobim.app";
+                else if (idx == oLive || idx == oBeta)
+                {
+                    p.Server = idx == oLive ? GeoBimPlugin.DefaultServer : "https://beta.geobim.app";
+                    // each server keeps its own token
+                    if (string.IsNullOrEmpty(p.Token))
+                        RhinoApp.WriteLine("geoBIM.app: no token for {0} yet — create one there (Account → Rhino plugin → Create), then choose Token.", p.Server);
+                }
                 else if (idx == oToken)
                 {
-                    string t = AskToken(mode, "geoBIM.app plugin token", "Plugin token (geoBIM.app → Account → Rhino plugin → Create)");
+                    string t = AskToken(mode, "geoBIM.app plugin token", "Plugin token for " + p.Server + " (Account → Rhino plugin → Create)");
                     if (t == null) continue;
                     t = t.Trim();
+                    if (t.Length == 0) { RhinoApp.WriteLine("geoBIM.app: no token entered — nothing changed."); continue; }
                     if (LooksLikeIonToken(t))
                     {
                         // pasted into the wrong option: a Cesium ion token is a JWT (eyJ…, two dots)
@@ -243,7 +276,7 @@ namespace GeoBimRhino
                         continue;
                     }
                     p.Token = t;
-                    RhinoApp.WriteLine("geoBIM.app: token saved — use Test to check it.");
+                    RhinoApp.WriteLine("geoBIM.app: token saved for {0} — use Test to check it.", p.Server);
                 }
                 else if (idx == oEpsg)
                 {
@@ -279,6 +312,7 @@ namespace GeoBimRhino
                         "Cesium ion access token (ion.cesium.com → Access Tokens). It needs the scopes assets:list, assets:read and assets:write.");
                     if (t == null) continue;
                     t = t.Trim();
+                    if (t.Length == 0) { RhinoApp.WriteLine("Cesium ion: no token entered — nothing changed."); continue; }
                     if (t.StartsWith("gbp_"))
                     {
                         RhinoApp.WriteLine("Cesium ion: that is a geoBIM.app plugin token — choose Token for it. The Cesium ion token comes from ion.cesium.com → Access Tokens.");
@@ -434,14 +468,16 @@ namespace GeoBimRhino
             // 2. its position
             PositionText pos = null;
             bool online = false;   // position from swisstopo's search or the map: terrain height may be looked up
+            double? mapTerrain = null;   // terrain height the map window read from Mapterhorn
             while (pos == null)
             {
                 if (openMap)
                 {
                     if (mode != RunMode.Interactive) return Result.Cancel;
-                    var ll = PickOnMap(doc, point, current, scale);
-                    if (ll == null) return Result.Cancel;
-                    pos = new PositionText { Kind = PositionText.Kinds.LatLon, Lat = ll.Value.Lat, Lon = ll.Value.Lon };
+                    var pick = PickOnMap(doc, point, current, scale);
+                    if (pick == null) return Result.Cancel;
+                    pos = new PositionText { Kind = PositionText.Kinds.LatLon, Lat = pick.Lat, Lon = pick.Lon };
+                    mapTerrain = pick.Terrain;
                     online = true;
                     break;
                 }
@@ -512,27 +548,55 @@ namespace GeoBimRhino
             if (pos.H != null) h = pos.H.Value;
             else
             {
+                // terrain: swisstopo's height model in Switzerland, else what the map read from Mapterhorn
                 double? terrain = null;
+                string terrainSource = null;
                 if (online && epsg == 2056 && GeoAdmin.InSwitzerland(e, n))
                 {
                     try { terrain = Task.Run(() => GeoAdmin.Height(e, n)).GetAwaiter().GetResult(); } catch { terrain = null; }
-                    if (terrain != null) RhinoApp.WriteLine("geoBIM.app: terrain there: {0} m above sea level (swisstopo).", F(terrain.Value, "0.0"));
+                    if (terrain != null) terrainSource = "swisstopo";
                 }
-                // keep the heights the model already has, else start from the terrain
+                if (terrain == null && mapTerrain != null) { terrain = mapTerrain; terrainSource = "Mapterhorn"; }
+                if (terrain != null)
+                    RhinoApp.WriteLine("geoBIM.app: terrain there: {0} m above sea level ({1}).", F(terrain.Value, "0.0"), terrainSource);
+
+                // what to propose: the z values if they already are heights above sea level; else the
+                // terrain where it is known (a point picked on the map or found by a search is meant to
+                // be on the ground); else the current height if the point stays where it was (within
+                // 1 km); nothing otherwise — a wrong default would lift or sink the whole model
+                double? keep = null;
+                if (current != null && GeoLocation.ModelToMap(doc, point, out double oe, out double on, out _, out int? oepsg))
+                {
+                    double moved = oepsg == epsg ? Math.Sqrt((oe - e) * (oe - e) + (on - n) * (on - n)) : double.PositiveInfinity;
+                    if (moved <= 1000) keep = current.H + z;
+                    else RhinoApp.WriteLine("geoBIM.app: the point moves {0} from where it was, so its old height ({1} m) is not proposed.",
+                        double.IsInfinity(moved) ? "to another coordinate system" : F(moved / 1000, "0.#") + " km", F(current.H + z, "0.##"));
+                }
                 double minZ = footprint != null ? footprint[0].Z * scale : 0;
-                double defH = current != null ? current.H + z : (minZ > 100 || terrain == null ? z : terrain.Value);
+                double? defH = minZ > 100 ? z : terrain ?? keep;
+                // the height changes from what the point had: say so, and how to keep it
+                if (minZ <= 100 && terrain != null && keep != null && Math.Abs(keep.Value - terrain.Value) > 5)
+                    RhinoApp.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                        "geoBIM.app: Enter puts the point on the terrain ({0:0.#} m, {1}); it was at {2:0.##} m — type that to keep it.",
+                        terrain.Value, terrainSource, keep.Value));
+                if (defH == null && mode != RunMode.Interactive)
+                {
+                    RhinoApp.WriteLine("geoBIM.app: no height known for this point — give it as the third value (E,N,H or latitude, longitude, H).");
+                    return Result.Failure;
+                }
                 var gn = new GetNumber();
                 gn.SetCommandPrompt(string.Format(CultureInfo.InvariantCulture,
-                    "Height of this point above sea level in metres (its z is {0:0.###} m)", z));
-                gn.SetDefaultNumber(defH);
-                gn.AcceptNothing(true);
+                    defH != null ? "Height of this point above sea level in metres (its z is {0:0.###} m)"
+                                 : "Height of this point above sea level in metres — type it (its z is {0:0.###} m)", z));
+                if (defH != null) gn.SetDefaultNumber(defH.Value);
+                gn.AcceptNothing(defH != null);
                 int oTerrain = terrain != null ? gn.AddOption("Terrain") : -1;
                 int oModel = gn.AddOption("ModelHeights");
                 while (true)
                 {
                     var hr = gn.Get();
                     if (hr == GetResult.Number) { h = gn.Number(); break; }
-                    if (hr == GetResult.Nothing) { h = defH; break; }
+                    if (hr == GetResult.Nothing && defH != null) { h = defH.Value; break; }
                     if (hr == GetResult.Option && gn.OptionIndex() == oTerrain) { h = terrain.Value; break; }
                     if (hr == GetResult.Option && gn.OptionIndex() == oModel) { h = z; break; }   // z values are heights above sea level
                     return Result.Cancel;
@@ -634,7 +698,7 @@ namespace GeoBimRhino
         }
 
         /// <summary>Map with the marker on the point's current position and the model's outline around it</summary>
-        static (double Lat, double Lon)? PickOnMap(RhinoDoc doc, Point3d point, MapOrigin current, double scale)
+        static MapPicker.Pick PickOnMap(RhinoDoc doc, Point3d point, MapOrigin current, double scale)
         {
             var o = new MapPicker.Options { Title = "geoBIM.app — where is this point? Click it on the map", Pick = true };
             if (GeoLocation.ModelToLatLon(doc, point, out double lat, out double lon)) { o.Lat = lat; o.Lon = lon; }
@@ -704,6 +768,8 @@ namespace GeoBimRhino
             try
             {
                 var res = Shared.Export(doc, objects, name, path, mode);
+                var sizeWarning = Shared.SizeWarning(doc, res);
+                if (sizeWarning != null) RhinoApp.WriteLine(sizeWarning);
                 if (res.Cancelled) return Result.Cancel;
                 RhinoApp.WriteLine("geoBIM.app: written {0}", path);
                 return Result.Success;
@@ -738,6 +804,8 @@ namespace GeoBimRhino
             try
             {
                 var res = Shared.Export(doc, objects, name, path, mode, true);
+                var sizeWarning = Shared.SizeWarning(doc, res);
+                if (sizeWarning != null) RhinoApp.WriteLine(sizeWarning);
                 if (res.Cancelled) return Result.Cancel;
                 var pl = Shared.GlbPlacement(res.Model);
                 RhinoApp.WriteLine("geoBIM.app: written {0}{1}", path, pl == null ? "" : string.Format(System.Globalization.CultureInfo.InvariantCulture,
@@ -824,6 +892,7 @@ namespace GeoBimRhino
                 catch (Exception ex) { RhinoApp.WriteLine("geoBIM.app: export failed — {0}", ex.Message); return Result.Failure; }
                 if (res.Cancelled) return Result.Cancel;
                 if (res.Elements == 0) { RhinoApp.WriteLine("geoBIM.app: no geometry to upload."); return Result.Nothing; }
+                if (!Shared.ConfirmSize(doc, res, mode)) { RhinoApp.WriteLine("geoBIM.app: not uploaded."); return Result.Cancel; }
                 var placement = glb ? Shared.GlbPlacement(res.Model) : null;
 
                 uint docSerial = doc.RuntimeSerialNumber;
@@ -1008,6 +1077,7 @@ namespace GeoBimRhino
                 try { res = Shared.ExportIon(doc, objects, name, path); }
                 catch (Exception ex) { RhinoApp.WriteLine("Cesium ion: export failed — {0}", ex.Message); return Result.Failure; }
                 if (res.Elements == 0) { RhinoApp.WriteLine("Cesium ion: no geometry to upload."); return Result.Nothing; }
+                if (!Shared.ConfirmSize(doc, res, mode)) { RhinoApp.WriteLine("Cesium ion: not uploaded."); return Result.Cancel; }
 
                 var model = Geoid.At(res.IonLat, res.IonLon, res.IonEpsg);
                 double geoidN;

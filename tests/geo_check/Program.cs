@@ -125,6 +125,19 @@ static class Program
         Check("Nominatim answer: hits in Switzerland and Liechtenstein and without position dropped", osm.Count == 1 && osm[0].Label.StartsWith("Lindau (Bodensee)")
               && osm[0].Lat == 47.5728668 && osm[0].Lon == 9.6961919 && osm[0].E == null && osm[0].Source == Places.Osm, osm.Count + " hits");
 
+        // the switch file on viewer.geobim.app (Nominatim usage policy: switchable without an update)
+        void Cfg(string json, string url, bool off, string what)
+        {
+            var c = Nominatim.ParseConfig(json);
+            Check("switch file: " + what, c.Url == url && c.Off == off, $"url {c.Url ?? "null"}, off {c.Off}");
+        }
+        Cfg(@"{""nominatim"": ""https://nominatim.example.org/search""}", "https://nominatim.example.org/search", false, "another service");
+        Cfg(@"{""nominatim"": null}", null, true, "null switches the search off");
+        Cfg(@"{""nominatim"": """"}", null, true, "an empty string switches it off");
+        Cfg(@"{""nominatim"": ""http://insecure.example.org/search""}", null, false, "http is ignored (setting kept)");
+        Cfg(@"{""other"": 1}", null, false, "no entry keeps the setting");
+        Cfg("not json", null, false, "broken file keeps the setting");
+
         if (args.Contains("online"))
         {
             var res = Places.Search("Lindau").GetAwaiter().GetResult();

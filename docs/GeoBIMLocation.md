@@ -41,8 +41,9 @@ Map north in the model, degrees clockwise from +Y <0>:                          
 ```
 
 **Only the place is known.** Enter takes the model origin; then type a place or an address (`Valens`,
-`Marienplatz München`) and pick the hit, or choose `Map` and click the spot. In Switzerland, confirm the height with
-`Terrain` if the model origin is at ground level; elsewhere type it.
+`Marienplatz München`) and pick the hit, or choose `Map` and click the spot. If the model origin is at ground level,
+Enter takes the terrain height (swisstopo in Switzerland; after a map click also elsewhere, from Mapterhorn);
+otherwise type the height.
 
 **Latitude and longitude from Google Maps.** Right-click the spot in Google Maps, click the coordinates to copy
 them, and paste them at the position prompt (`46.98695, 9.47632`). The plugin converts them to LV95 or UTM.
@@ -61,7 +62,7 @@ Afterwards, right-click **Location** to check the model's outline on the map.
 |---|---|---|---|
 | 1 | *Point whose position you know* | the model origin 0,0,0 | `Map`: go straight to the map window. `Show`: show the current position on the map and end. `Clear`: remove the map origin and end. |
 | 2 | *Its position: map coordinates E,N[,H], latitude, longitude[, H], or a place or address* | if the document already has a map origin: the point's current map coordinates | `Map`: pick the point on the map. A place or address lists the hits (see [Search](#search)); type the number of the right one. |
-| 3 | *Height of this point above sea level in metres* (only when the position had no height) | see [Height](#height) | `Terrain` (after a search or map click in Switzerland): swisstopo's terrain height there. `ModelHeights`: the point's z, so the model's z values stay heights above sea level. |
+| 3 | *Height of this point above sea level in metres* (only when the position had no height) | see [Height](#height); none when no height is known, then type it | `Terrain`: the terrain height there (swisstopo after a search or map click in Switzerland, Mapterhorn after a map click elsewhere). `ModelHeights`: the point's z, so the model's z values stay heights above sea level. |
 | 4 | *Map north in the model, degrees clockwise from +Y* (only when no rotation was given) | the current rotation, else 0 | `TwoPoints`: pick a line that points to map north. |
 
 The command first prints what the document has now, for example:
@@ -130,12 +131,19 @@ The map origin stores `H0 = H − z` (z of the picked point, in metres), so a mo
 
 Default at the height prompt:
 
-1. the document already has a map origin → the point's current height (nothing changes vertically);
-2. the lowest visible object lies more than 100 m above 0, or no terrain height is known → the point's z
-   (the model's z values are taken as heights above sea level);
-3. otherwise, after a search or map click in Switzerland → swisstopo's terrain height at that point.
+1. the lowest visible object lies more than 100 m above 0 → the point's z (the model's z values are taken as heights
+   above sea level, as in the Taminabrücke);
+2. a terrain height is known → that height: a point picked on the map or found by a search is taken to be on the
+   ground (swisstopo's height model in Switzerland, Mapterhorn's after a map click elsewhere). If the point had
+   another height before, the command says so: *Enter puts the point on the terrain (401.5 m, Mapterhorn); it was
+   at 668.2 m — type that to keep it*;
+3. the document already has a map origin and the point stays within 1 km of where it was → its current height
+   (nothing changes vertically). Moved further, the old height is not proposed, and the command says so;
+4. otherwise **no default**: type the height (or take `ModelHeights`). A script without a height stops with
+   *no height known for this point — give it as the third value*, and the map origin stays as it was.
 
-Check the default before pressing Enter: a wrong height moves the whole model up or down.
+Check the default before pressing Enter: a wrong height moves the whole model up or down. A point that is not on the
+ground (a bridge deck, an upper floor) needs its height typed.
 
 The geoBIM.app server adds the geoid to these heights (GCG2016 in Germany, EGM2008 elsewhere). Cesium ion works
 with ellipsoidal heights, so `GeoBIMUploadIon` adds the geoid undulation N itself, from the same models embedded in
@@ -181,7 +189,11 @@ a typed one (UTM outside Switzerland's box). The plugin uses Nominatim as its us
 - it makes at most one request per second;
 - it searches only when you press Enter or *Search*, never while you type;
 - it caches the answers for the session;
-- it credits OpenStreetMap with the hits.
+- it credits OpenStreetMap with the hits;
+- the service can be switched without a plugin update: the plugin reads `https://viewer.geobim.app/plugin/rhino.json`
+  at most once an hour. `"nominatim"` there names the search URL; `null` switches the OpenStreetMap search off, and the
+  command then says *the OpenStreetMap search is switched off for now*. If the file cannot be read, the built-in
+  URL is used.
 
 If one service does not answer, the other's hits are shown with a note.
 
@@ -197,7 +209,9 @@ If one service does not answer, the other's hits are shown with a note.
   elsewhere (see [Search](#search)). The plugin runs the search, not the page. A hit moves the map there, on
   swisstopo's map in Switzerland and on TopPlusOpen elsewhere. When picking, the hit also sets the marker.
 - **Pick**: click the point. The marker moves there, and the model's outline (its bounding box) follows it, turned by
-  the current map north. **OK** takes the position, **Cancel** ends the command.
+  the current map north. The window then reads the terrain height there from Mapterhorn (open terrain models,
+  the same as geoBIM.app's viewer; heights above sea level) and shows it next to the position. The command offers it
+  as `Terrain`. **OK** takes the position, **Cancel** ends the command.
 - **Show**: the marker at the model origin (for models in map coordinates: the model centre) and the outline of the
   visible objects at their place. Close with **Close**.
 
@@ -264,6 +278,9 @@ _-GeoBIMLocation _Clear                              remove the map origin
 | `note — Rhino's Location is … m and …° away from the map origin; GLB and Cesium ion follow the map origin` | The two were changed apart. Run `GeoBIMLocation` again. |
 | `GLB is placed by Rhino's Location: the plugin cannot convert EPSG:…` (or *the coordinate system … is ambiguous*) | GLB and Cesium ion fall back to Rhino's Location. |
 | `Cesium ion: this model has no position yet — set it with GeoBIMLocation.` | No map origin, no map coordinates, no Location. |
+| `Enter puts the point on the terrain (… m, …); it was at … m — type that to keep it` | The point had another height before. Enter takes the terrain; type the old height if the point is not on the ground. |
+| `the point moves … km from where it was, so its old height (… m) is not proposed` | The model moves to another place: confirm the terrain height or type the height. |
+| `no height known for this point — give it as the third value (E,N,H or latitude, longitude, H)` | A script moved the model without a height, and there is no default for it. Nothing was changed. |
 
 ## Accuracy
 
@@ -275,19 +292,25 @@ _-GeoBIMLocation _Clear                              remove the map origin
 - **Search hits** from swisstopo are rounded to about 0.25 m. OpenStreetMap gives a point of the place: a building's
   centre, or a town's centre or town hall. A place name gives the position of its label, not a particular building.
   Check it on the map.
-- **Terrain** is swisstopo's height model at the point: the ground, not a roof or a bridge deck.
+- **Terrain** is the ground, not a roof or a bridge deck: swisstopo's swissALTI3D in Switzerland; elsewhere
+  Mapterhorn's best tile at the point (national terrain models where Mapterhorn has them, Copernicus GLO-30
+  elsewhere).
 
 ## Network and privacy
 
 Typed coordinates are converted offline. The plugin goes online only when you ask it to:
 
-- **Search** sends the search text to swisstopo (api3.geo.admin.ch, SearchServer) and to OpenStreetMap's Nominatim
+- **Search** reads the plugin's switch file from viewer.geobim.app (at most once an hour, nothing is sent) and sends the
+  search text to swisstopo (api3.geo.admin.ch, SearchServer) and to OpenStreetMap's Nominatim
   (nominatim.openstreetmap.org, run by the OpenStreetMap Foundation), with the plugin's User-Agent; Nominatim also
   gets the interface language, so names come in your language where OpenStreetMap has them.
-- **Terrain** sends the LV95 coordinates of the point to swisstopo's height service.
+- **Terrain** sends the LV95 coordinates of the point to swisstopo's height service (Switzerland).
+- **A map click** loads the Mapterhorn terrain tile of the point (tiles.mapterhorn.com), which says roughly where
+  you clicked.
 - **The map window** loads Leaflet 1.9.4 from unpkg.com, pinned by its SRI hash. It loads map tiles of the area
   shown from wmts.geo.admin.ch (swisstopo) and sgx.geodatenzentrum.de (BKG). Its search box goes through the
   plugin, like the command line's.
 
 The map data are © swisstopo and © BKG (dl-de/by-2-0), as credited in the map window. Places outside Switzerland
-come from OpenStreetMap, © OpenStreetMap contributors (ODbL).
+come from OpenStreetMap, © OpenStreetMap contributors (ODbL). Terrain heights after a map click: © Mapterhorn and
+its sources.

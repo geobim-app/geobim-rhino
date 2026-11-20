@@ -29,6 +29,8 @@ namespace GeoBimRhino
         public double IonLon, IonLat, IonElevation;
         // GLB / Cesium ion: why the map position could not be used (then Rhino's Location places it), else null
         public string PlacementNote;
+        // largest side of the exported objects' bounding box in metres (for the units check)
+        public double ExtentMetres;
         // Cesium ion: coordinate system of the position (null for Rhino's Location), for the geoid choice
         public int? IonEpsg;
     }
@@ -92,6 +94,8 @@ namespace GeoBimRhino
             foreach (var it in items) bbox.Union(it.Geometry.GetBoundingBox(it.Xform));
             var c = bbox.Center;
             double cx = c.X * scale, cy = c.Y * scale;
+            var diag = bbox.Diagonal;
+            res.ExtentMetres = Math.Max(Math.Max(Math.Abs(diag.X), Math.Abs(diag.Y)), Math.Abs(diag.Z)) * scale;
 
             // ---- Georeferencing → origin (model units) ----
             Point3d origin;

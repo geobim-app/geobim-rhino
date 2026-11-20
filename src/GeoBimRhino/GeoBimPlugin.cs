@@ -120,10 +120,29 @@ namespace GeoBimRhino
             set => Settings.SetString("server", (value ?? DefaultServer).Trim().TrimEnd('/'));
         }
 
+        /// <summary>
+        /// Plugin token for the current server. A token works only on the site that created it, so
+        /// each server keeps its own ("token|https://viewer.geobim.app"); switching between Live and
+        /// Beta needs no new input.
+        /// </summary>
         public string Token
         {
-            get => Settings.GetString("token", "");
-            set => Settings.SetString("token", (value ?? "").Trim());
+            get => TokenFor(Server);
+            set => Settings.SetString(TokenKey(Server), (value ?? "").Trim());
+        }
+
+        static string TokenKey(string server) => "token|" + (server ?? "").Trim().TrimEnd('/').ToLowerInvariant();
+
+        public string TokenFor(string server)
+        {
+            string own = Settings.GetString(TokenKey(server), "");
+            if (own.Length > 0) return own;
+            // until 0.3.0 there was one token for all servers: it belongs to the server set then
+            string legacy = Settings.GetString("token", "");
+            if (legacy.Length == 0) return "";
+            Settings.SetString(TokenKey(Server), legacy);
+            Settings.DeleteItem("token");
+            return TokenKey(server) == TokenKey(Server) ? legacy : "";
         }
 
         /// <summary>Cesium ion access token (scopes assets:list, assets:read, assets:write)</summary>
