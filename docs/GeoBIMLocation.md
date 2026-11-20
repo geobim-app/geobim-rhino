@@ -20,6 +20,7 @@ position already and uses it for every format.
 - [Coordinate system](#coordinate-system)
 - [Height](#height)
 - [Map north](#map-north)
+- [Search](#search)
 - [The map window](#the-map-window)
 - [What the command stores](#what-the-command-stores)
 - [How the exports use it](#how-the-exports-use-it)
@@ -39,9 +40,9 @@ Its position: …: 2683110.25, 1247930.10, 408.5
 Map north in the model, degrees clockwise from +Y <0>:                              ← Enter: +Y is north
 ```
 
-**Only the place is known.** Enter takes the model origin; then type a place or an address in Switzerland and
-pick the hit, or choose `Map` and click the spot. Confirm the height with `Terrain` if the model origin is at ground
-level.
+**Only the place is known.** Enter takes the model origin; then type a place or an address (`Valens`,
+`Marienplatz München`) and pick the hit, or choose `Map` and click the spot. In Switzerland, confirm the height with
+`Terrain` if the model origin is at ground level; elsewhere type it.
 
 **Latitude and longitude from Google Maps.** Right-click the spot in Google Maps, click the coordinates to copy
 them, and paste them at the position prompt (`46.98695, 9.47632`). The plugin converts them to LV95 or UTM.
@@ -59,7 +60,7 @@ Afterwards, right-click **Location** to check the model's outline on the map.
 | # | Prompt | Default (Enter) | Options |
 |---|---|---|---|
 | 1 | *Point whose position you know* | the model origin 0,0,0 | `Map`: go straight to the map window. `Show`: show the current position on the map and end. `Clear`: remove the map origin and end. |
-| 2 | *Its position: map coordinates E,N[,H], latitude, longitude[, H], or a place or address in Switzerland* | if the document already has a map origin: the point's current map coordinates | `Map`: pick the point on the map. A place or address lists swisstopo's hits; type the number of the right one. |
+| 2 | *Its position: map coordinates E,N[,H], latitude, longitude[, H], or a place or address* | if the document already has a map origin: the point's current map coordinates | `Map`: pick the point on the map. A place or address lists the hits (see [Search](#search)); type the number of the right one. |
 | 3 | *Height of this point above sea level in metres* (only when the position had no height) | see [Height](#height) | `Terrain` (after a search or map click in Switzerland): swisstopo's terrain height there. `ModelHeights`: the point's z, so the model's z values stay heights above sea level. |
 | 4 | *Map north in the model, degrees clockwise from +Y* (only when no rotation was given) | the current rotation, else 0 | `TwoPoints`: pick a line that points to map north. |
 
@@ -90,7 +91,7 @@ geoBIM.app: Rhino's Location set to the same place (46.986952° N, 9.476321° E,
 | `46.98695, 9.47632` | latitude, longitude in degrees (Google Maps order) |
 | `46.98695, 9.47632, 830` | latitude, longitude and height |
 | `46°59'13"N 9°28'35"E` | degrees, minutes, seconds; `S`/`W` for south/west, `O` (Ost) is accepted for east; longitude first works too |
-| `Valens`, `Bahnhofstrasse 1 Zürich` | anything with letters: a search in swisstopo's place and address index |
+| `Valens`, `Bahnhofstrasse 1 Zürich`, `Marienplatz München` | anything with letters: a [search](#search) for places and addresses |
 
 Map coordinates must lie more than 100 km from 0 (that is how the plugin tells them from latitude/longitude).
 Decimal commas (`46,9123 9,4877`) are refused rather than guessed: use a decimal point.
@@ -155,14 +156,46 @@ True north differs from map north by the meridian convergence: about +1.5° in e
 Rhino's Location accordingly; the command prints it. If your model's +Y points to **true** north instead (for
 example because it was aligned with a web map), enter that convergence as map north angle, e.g. `1.49` at Pfäfers.
 
+## Search
+
+A place or address (at the position prompt or in the map window's search box) is looked up in two places at once:
+
+| Service | Covers | Hits |
+|---|---|---|
+| swisstopo (api3.geo.admin.ch) | Switzerland and Liechtenstein: places, addresses, parcels, field names, stops, … | listed first, with LV95 coordinates |
+| OpenStreetMap's Nominatim (nominatim.openstreetmap.org) | the rest of the world | listed after them; hits in Switzerland and Liechtenstein are dropped (swisstopo has them) |
+
+At the command line each hit shows its source; type the number of the right one (a script takes the first):
+
+```
+  1  Lindau (ZH)   (swisstopo)
+  …
+  9  Lindau (Bodensee), Landkreis Lindau, Bayern, 88131, Deutschland   (OpenStreetMap)
+  Places outside Switzerland: © OpenStreetMap contributors (Nominatim).
+Which one <1>:
+```
+
+A swisstopo hit gives LV95 coordinates. An OpenStreetMap hit gives latitude/longitude, which the plugin converts like
+a typed one (UTM outside Switzerland's box). The plugin uses Nominatim as its usage policy asks:
+- it sends its own User-Agent (`geoBIM.app-Rhino/<version> (+https://geobim.app)`, nothing about you);
+- it makes at most one request per second;
+- it searches only when you press Enter or *Search*, never while you type;
+- it caches the answers for the session;
+- it credits OpenStreetMap with the hits.
+
+If one service does not answer, the other's hits are shown with a note.
+
 ## The map window
 
 `Map` (pick) and `Show` open the same window:
 
 - **Layers** (top right): swisstopo's national map and aerial images (Switzerland) and BKG's TopPlusOpen (Europe
-  and world).
-- **Search box** (top left): places and addresses in Switzerland (swisstopo); a hit moves the map there and, when
-  picking, sets the marker.
+  and world; in Germany down to buildings and house numbers). Outside Switzerland, swisstopo's tiles are empty, so
+  the map switches to TopPlusOpen when you leave Switzerland. A model without a position starts on TopPlusOpen over
+  central Europe.
+- **Search box** (top left, Enter or *Search*): places and addresses, swisstopo in Switzerland and OpenStreetMap
+  elsewhere (see [Search](#search)). The plugin runs the search, not the page. A hit moves the map there, on
+  swisstopo's map in Switzerland and on TopPlusOpen elsewhere. When picking, the hit also sets the marker.
 - **Pick**: click the point. The marker moves there, and the model's outline (its bounding box) follows it, turned by
   the current map north. **OK** takes the position, **Cancel** ends the command.
 - **Show**: the marker at the model origin (for models in map coordinates: the model centre) and the outline of the
@@ -222,8 +255,9 @@ _-GeoBIMLocation _Clear                              remove the map origin
 | Message | Meaning |
 |---|---|
 | `"…" is not a position — e.g. 2755000,1206000 (LV95), 46.98695, 9.47632 …` | The text is neither coordinates nor an address (decimal commas, a single number, …). |
-| `swisstopo found nothing for "…"` | The search covers Switzerland and Liechtenstein. Elsewhere use latitude, longitude or `Map`. |
-| `swisstopo search failed — …` | No connection to api3.geo.admin.ch. |
+| `nothing found for "…" (swisstopo in Switzerland, OpenStreetMap elsewhere)` | Try another spelling (with the town), latitude, longitude or `Map`. |
+| `swisstopo did not answer (…), only OpenStreetMap was searched` (or the other way round) | One of the two services is unreachable; the hits come from the other. |
+| `search failed — …` | Neither service answered: no connection? |
 | `positions south of the equator need map coordinates` | The plugin converts northern UTM zones only. |
 | `EPSG:… cannot be converted to latitude/longitude by the plugin …, so Rhino's Location is unchanged` | Gauss-Krüger, LV03 or Austria: the IFC uses the map origin; set the Location with `EarthAnchorPoint` for GLB and Cesium ion. |
 | `the visible objects already lie in map coordinates …` | The model is drawn in map coordinates; it needs no map origin. `Show` displays its position. |
@@ -238,17 +272,22 @@ _-GeoBIMLocation _Clear                              remove the map origin
   compared with pyproj (`tests/geo_check`). The plugin uses the same datum step as pyproj and the geobim-tiler:
   CH1903+ → WGS 84 (EPSG:1676) and ETRS89 = WGS 84. IFC, GLB and Cesium ion therefore agree with each other to
   millimetres. EPSG gives these datum steps an accuracy of about 1 m relative to WGS 84 itself.
-- **Search hits** are rounded by swisstopo to about 0.25 m. A place name gives the position of its label, not a
-  particular building. Check it on the map.
+- **Search hits** from swisstopo are rounded to about 0.25 m. OpenStreetMap gives a point of the place: a building's
+  centre, or a town's centre or town hall. A place name gives the position of its label, not a particular building.
+  Check it on the map.
 - **Terrain** is swisstopo's height model at the point: the ground, not a roof or a bridge deck.
 
 ## Network and privacy
 
 Typed coordinates are converted offline. The plugin goes online only when you ask it to:
 
-- **Search** sends the search text to swisstopo (api3.geo.admin.ch, SearchServer).
+- **Search** sends the search text to swisstopo (api3.geo.admin.ch, SearchServer) and to OpenStreetMap's Nominatim
+  (nominatim.openstreetmap.org, run by the OpenStreetMap Foundation), with the plugin's User-Agent; Nominatim also
+  gets the interface language, so names come in your language where OpenStreetMap has them.
 - **Terrain** sends the LV95 coordinates of the point to swisstopo's height service.
 - **The map window** loads Leaflet 1.9.4 from unpkg.com, pinned by its SRI hash. It loads map tiles of the area
-  shown from wmts.geo.admin.ch (swisstopo) and sgx.geodatenzentrum.de (BKG). The search box queries swisstopo.
+  shown from wmts.geo.admin.ch (swisstopo) and sgx.geodatenzentrum.de (BKG). Its search box goes through the
+  plugin, like the command line's.
 
-The map data are © swisstopo and © BKG (dl-de/by-2-0), as credited in the map window.
+The map data are © swisstopo and © BKG (dl-de/by-2-0), as credited in the map window. Places outside Switzerland
+come from OpenStreetMap, © OpenStreetMap contributors (ODbL).

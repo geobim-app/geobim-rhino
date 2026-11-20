@@ -17,13 +17,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **One position for every export: `GeoBIMLocation`** (`GeoLocation.cs`, `GeoProj.cs`, `GeoAdmin.cs`,
   `MapPicker.cs`, `Commands.cs`): one command says where the model lies. Pick a point of the model (Enter = origin)
   and give its position as map coordinates, latitude/longitude (as Google Maps or map.geo.admin.ch copy them, also
-  degrees/minutes/seconds), a place or address in Switzerland (swisstopo search) or a click on a map window
-  (swisstopo map and aerial images, BKG TopPlusOpen, the model's outline follows the marker); then the height
+  degrees/minutes/seconds), a place or address (swisstopo search in Switzerland, OpenStreetMap's Nominatim
+  elsewhere, asked in parallel; hits show their source; Nominatim used as its usage policy asks: the plugin's
+  User-Agent, one request per second, no search while typing, cached, credited) or a click on a map window
+  (swisstopo map and aerial images, BKG TopPlusOpen, taken automatically outside Switzerland and at the start when
+  the model has no position yet; the model's outline follows the marker; its search box runs through the
+  plugin); then the height
   (`Terrain`: swisstopo's terrain height after a search or map click) and map north (`TwoPoints`). It stores the
   map origin and the coordinate system and sets Rhino's Location to the same place, with true north from the
   meridian convergence. `Show` displays the model's outline on the map. Replaces `GeoBIMMapOrigin` (never
   released). The plugin converts LV95 (Swiss oblique Mercator, CH1903+ → WGS84 as EPSG:1676) and UTM (ETRS89/WGS84,
-  Krüger series) itself; `tests/geo_check` checks it against pyproj (below 0.2 mm, convergence to 0.00001°).
+  Krüger series) itself; `tests/geo_check` checks it against pyproj (below 0.2 mm, convergence to 0.00001°)
+  and the parsing of swisstopo's and Nominatim's answers (`dotnet run online` also asks both services once).
   Reference: `docs/GeoBIMLocation.md` (prompts, input formats, coordinate system, height, north, stored values,
   scripting, messages, accuracy, network).
   - **GLB and Cesium ion follow the map position**: they take latitude/longitude and true north from the map

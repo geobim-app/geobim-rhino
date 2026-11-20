@@ -446,7 +446,7 @@ namespace GeoBimRhino
                     break;
                 }
                 var gs = new GetString();
-                gs.SetCommandPrompt("Its position: map coordinates E,N[,H], latitude, longitude[, H], or a place or address in Switzerland");
+                gs.SetCommandPrompt("Its position: map coordinates E,N[,H], latitude, longitude[, H], or a place or address");
                 string def = null;
                 if (GeoLocation.ModelToMap(doc, point, out double ce, out double cn, out double ch, out _) && current != null)
                     def = F(ce, "0.###") + "," + F(cn, "0.###") + "," + F(ch, "0.###");
@@ -472,7 +472,10 @@ namespace GeoBimRhino
                 {
                     var hit = SearchAddress(parsed.Address, mode);
                     if (hit == null) { if (mode != RunMode.Interactive) return Result.Failure; continue; }
-                    parsed = new PositionText { Kind = PositionText.Kinds.Map, E = hit.E, N = hit.N };
+                    // swisstopo: LV95 as given; OpenStreetMap: latitude/longitude, converted like typed ones
+                    parsed = hit.E != null
+                        ? new PositionText { Kind = PositionText.Kinds.Map, E = hit.E.Value, N = hit.N.Value }
+                        : new PositionText { Kind = PositionText.Kinds.LatLon, Lat = hit.Lat, Lon = hit.Lon };
                     online = true;
                 }
                 pos = parsed;
@@ -598,28 +601,35 @@ namespace GeoBimRhino
             return !setting.Equals("auto", StringComparison.OrdinalIgnoreCase) && int.TryParse(setting, out int code) ? code : (int?)null;
         }
 
-        /// <summary>swisstopo search; with several hits the user picks one (scripts: the first). Null when nothing was chosen.</summary>
-        static GeoAdmin.Hit SearchAddress(string text, RunMode mode)
+        /// <summary>
+        /// Place and address search: swisstopo (Switzerland, Liechtenstein) and OpenStreetMap's
+        /// Nominatim (elsewhere); with several hits the user picks one (scripts: the first).
+        /// Null when nothing was chosen.
+        /// </summary>
+        static Place SearchAddress(string text, RunMode mode)
         {
-            List<GeoAdmin.Hit> hits;
-            try { hits = Task.Run(() => GeoAdmin.Search(text)).GetAwaiter().GetResult(); }
+            Places.Result res;
+            try { res = Task.Run(() => Places.Search(text)).GetAwaiter().GetResult(); }
             catch (Exception ex)
             {
-                RhinoApp.WriteLine("geoBIM.app: swisstopo search failed — {0}", (ex as AggregateException)?.InnerException?.Message ?? ex.Message);
+                RhinoApp.WriteLine("geoBIM.app: search failed — {0}", (ex as AggregateException)?.InnerException?.Message ?? ex.Message);
                 return null;
             }
+            if (res.Note != null) RhinoApp.WriteLine("geoBIM.app: " + res.Note + ".");
+            var hits = res.Hits;
             if (hits.Count == 0)
             {
-                RhinoApp.WriteLine("geoBIM.app: swisstopo found nothing for \"{0}\" (it searches Switzerland and Liechtenstein; elsewhere use latitude, longitude or Map).", text);
+                RhinoApp.WriteLine("geoBIM.app: nothing found for \"{0}\" (swisstopo in Switzerland, OpenStreetMap elsewhere); try another spelling, latitude, longitude or Map.", text);
                 return null;
             }
             for (int i = 0; i < hits.Count; i++)
-                RhinoApp.WriteLine(string.Format("  {0}  {1}   (E {2} N {3})", i + 1, hits[i].Label, F(hits[i].E, "0"), F(hits[i].N, "0")));
+                RhinoApp.WriteLine(string.Format("  {0}  {1}   ({2})", i + 1, hits[i].Label, hits[i].Source));
+            if (hits.Exists(h => h.Source == Places.Osm)) RhinoApp.WriteLine("  Places outside Switzerland: " + Nominatim.Attribution + ".");
             int pick = 1;
             if (hits.Count > 1 && mode == RunMode.Interactive &&
                 RhinoGet.GetInteger("Which one", true, ref pick, 1, hits.Count) != Result.Success) return null;
             var hit = hits[pick - 1];
-            RhinoApp.WriteLine("geoBIM.app: {0}.", hit.Label);
+            RhinoApp.WriteLine("geoBIM.app: {0} ({1}).", hit.Label, hit.Source);
             return hit;
         }
 
@@ -628,7 +638,7 @@ namespace GeoBimRhino
         {
             var o = new MapPicker.Options { Title = "geoBIM.app — where is this point? Click it on the map", Pick = true };
             if (GeoLocation.ModelToLatLon(doc, point, out double lat, out double lon)) { o.Lat = lat; o.Lon = lon; }
-            o.Swiss = o.Lat == null || GeoProj.DefaultEpsg(o.Lat.Value, o.Lon.Value) == 2056;
+            o.Swiss = o.Lat != null && GeoProj.DefaultEpsg(o.Lat.Value, o.Lon.Value) == 2056;   // else BKG's map over central Europe
             var fp = GeoLocation.Footprint(doc);
             if (fp != null)
             {

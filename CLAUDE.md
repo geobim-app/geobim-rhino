@@ -18,8 +18,9 @@ what changed recently.
   Then run `python tests/check_exports.py` (system Python with ifcopenshell 0.9 and pyproj). It validates the
   schema, compares absolute coordinates between the cases and checks positions, true north and the ion frames
   against pyproj. Exit code 0 means everything passed.
-- Projection maths: `dotnet run` in `tests/geo_check` checks `GeoProj.cs` (LV95, UTM, convergence, parsing of
-  typed positions) against pyproj values; all must pass (well below a millimetre).
+- Projection maths and search parsing: `dotnet run` in `tests/geo_check` checks `GeoProj.cs` (LV95, UTM,
+  convergence, parsing of typed positions) against pyproj values and the parsing of swisstopo's and Nominatim's
+  answers; all must pass. `dotnet run online` also searches both services once.
 - Geoid grids: `python tools/make_geoid.py` rebuilds `src/GeoBimRhino/Resources/geoid/*.bin` from PROJ-data
   (pyproj fetches the grids from cdn.proj.org); they are embedded resources of the plugin.
 - Toolbar: `python tools/make_icons.py && python tools/make_rui.py`. Buttons and their left/right macros are in
@@ -40,7 +41,8 @@ what changed recently.
 | `GeoLocation.cs` | One position for all exports: placement for GLB/ion, setting map origin and Rhino's Location together, mismatch check |
 | `GeoProj.cs` | LV95 and UTM ↔ WGS84, meridian convergence, parsing typed positions (no Rhino types) |
 | `Geoid.cs` | Geoid undulation N from embedded grids (GCG2016 Germany, EGM2008 Europe 5' and world 1°; no Rhino types) |
-| `GeoAdmin.cs` | swisstopo search and terrain height (geo.admin.ch API, Switzerland) |
+| `GeoAdmin.cs` | swisstopo search and terrain height (geo.admin.ch API, Switzerland), the plugin's User-Agent (no Rhino types) |
+| `Places.cs` | Place search for `GeoBIMLocation`: swisstopo and OpenStreetMap's Nominatim in parallel, Nominatim's rate limit and cache (no Rhino types) |
 | `MapPicker.cs` | Map window (Eto WebView, Leaflet, swisstopo and BKG tiles) to pick or show the position |
 | `CrsDetect.cs` | Which EPSG code map coordinates belong to (no Rhino types) |
 | `IfcWriter.cs` | IFC 4 STEP writer without external libraries; also defines `IfcModelData` |
@@ -90,8 +92,10 @@ the map origin and Rhino's Location from one input, so all formats agree; export
 - **Dependencies:** no NuGet packages besides RhinoCommon without asking. The plugin ships as one `.rhp` (plus
   `.rui`).
 - **External services besides the upload targets** are called only on the user's action: swisstopo's search and
-  height service (`GeoAdmin.cs`) when they search an address or pick on the map; the map window loads Leaflet from
-  unpkg (version and SRI hash pinned) and tiles from swisstopo and BKG.
+  height service (`GeoAdmin.cs`) and OpenStreetMap's Nominatim (`Places.cs`) when they search an address or pick on
+  the map; the map window loads Leaflet from unpkg (version and SRI hash pinned) and tiles from swisstopo and BKG.
+  Keep to Nominatim's usage policy: the plugin's User-Agent, at most one request per second, no search-as-you-type,
+  cache, attribution.
 - **Compatibility:**
   - Keep the plugin GUID and the command GUIDs. Rhino and the Package Manager identify the plugin by them.
   - New commands get a new GUID.

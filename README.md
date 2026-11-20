@@ -48,7 +48,8 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
    - map coordinates `2755000, 1206000` (LV95; also `2'755'000.00, 1'206'000.00` as map.geo.admin.ch copies them),
      UTM with or without zone prefix, Gauss-Krüger, …;
    - latitude, longitude `46.98695, 9.47632` (Google Maps: right-click → copy) or `46°59'13"N 9°28'35"E`;
-   - a place or address in Switzerland (`Valens`, `Bahnhofstrasse 1 Zürich`): swisstopo's search, pick from the list;
+   - a place or address (`Valens`, `Marienplatz München`): swisstopo's search in Switzerland, OpenStreetMap's
+     Nominatim elsewhere; pick from the list;
    - **Map**: click the point on a map (swisstopo's map and aerial images, BKG TopPlusOpen elsewhere, search box);
      the model's outline follows the marker.
 3. **The height** of that point above sea level. Enter keeps the model's z values as heights above sea level;
@@ -66,8 +67,9 @@ work for the IFC via the map origin; GLB and Cesium ion then need Rhino's Locati
 (`EarthAnchorPoint`). Models drawn in map coordinates need none of this: their position is known, and GLB and
 Cesium ion are placed from it too (LV95, UTM).
 
-Network: the address search and `Terrain` ask swisstopo's geo.admin.ch API; the map window loads Leaflet from unpkg
-and map tiles from swisstopo and BKG. Typed coordinates are converted offline.
+Network: the address search asks swisstopo's geo.admin.ch API and OpenStreetMap's Nominatim, `Terrain` asks
+swisstopo; the map window loads Leaflet from unpkg and map tiles from swisstopo and BKG. Typed coordinates are
+converted offline.
 
 **Full reference:** [docs/GeoBIMLocation.md](docs/GeoBIMLocation.md): all prompts and input formats, how the
 coordinate system, height and map north are chosen, what is stored, scripting, messages and accuracy.

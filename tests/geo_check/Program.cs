@@ -1,8 +1,11 @@
 // Checks GeoProj against pyproj 3.7.2 / PROJ 9.5.1 (reference values computed with
 // Transformer.from_crs(epsg, 4326) and Proj.get_factors(...).meridian_convergence),
-// PositionText against the formats map.geo.admin.ch and Google Maps copy, and the embedded geoid
-// grids against PROJ's full grids (us_nga_egm08_25.tif, de_bkg_gcg2016.tif).
+// PositionText against the formats map.geo.admin.ch and Google Maps copy, and the parsing
+// of swisstopo's and Nominatim's search answers (samples in the shape both services send), and
+// the embedded geoid grids against PROJ's full grids (us_nga_egm08_25.tif, de_bkg_gcg2016.tif).
+// "dotnet run online" also searches both services once for "Lindau".
 using System;
+using System.Linq;
 using GeoBimRhino;
 
 static class Program
@@ -57,7 +60,7 @@ static class Program
         if (!ok) _failed++;
     }
 
-    static int Main()
+    static int Main(string[] args)
     {
         const double m = 111320.0;   // metres per degree latitude (roughly)
         foreach (var r in Refs)
@@ -104,6 +107,33 @@ static class Program
             double tol = r == null ? 0 : r.Model == "GCG2016" ? 0.05 : r.Coarse ? 2.5 : 0.08;
             Check($"geoid {g.Name}", model && Math.Abs(r.N - g.N) <= tol,
                   r == null ? "no grid" : $"{r.N:0.000} m {r.Model} (PROJ {g.N:0.000}, {r.N - g.N:+0.000;-0.000})");
+        }
+
+        // search answers
+        var ch = GeoAdmin.ParseSearch(@"{""results"":[
+            {""attrs"":{""label"":""<i>Ort</i> <b>Valens</b> (SG) - Pfäfers"",""lat"":46.9693756,""lon"":9.4811401,""x"":1204056.25,""y"":2755417.25},""id"":245836,""weight"":100},
+            {""attrs"":{""label"":""without coordinates""},""id"":2,""weight"":1}]}");
+        Check("swisstopo answer: one hit, label without tags, LV95 from y/x", ch.Count == 1 && ch[0].Label == "Ort Valens (SG) - Pfäfers"
+              && ch[0].E == 2755417.25 && ch[0].N == 1204056.25 && ch[0].Source == Places.Swisstopo, ch.Count > 0 ? ch[0].Label : "none");
+        Check("swisstopo answer: WGS84 from LV95", ch.Count == 1 && Math.Abs(ch[0].Lat - 46.9693756) < 1e-5 && Math.Abs(ch[0].Lon - 9.4811401) < 1e-5,
+              ch.Count > 0 ? $"{ch[0].Lat:0.0000000}, {ch[0].Lon:0.0000000}" : "");
+        var osm = Nominatim.Parse(@"[
+            {""lat"":""47.5728668"",""lon"":""9.6961919"",""display_name"":""Lindau (Bodensee), Landkreis Lindau, Bayern, 88131, Deutschland"",""address"":{""city"":""Lindau (Bodensee)"",""country_code"":""de""}},
+            {""lat"":""47.4426676"",""lon"":""8.6722839"",""display_name"":""Lindau, Bezirk Pfäffikon, Zürich, Schweiz"",""address"":{""country_code"":""ch""}},
+            {""lat"":""47.1410"",""lon"":""9.5209"",""display_name"":""Vaduz, Liechtenstein"",""address"":{""country_code"":""li""}},
+            {""display_name"":""without position"",""address"":{""country_code"":""de""}}]");
+        Check("Nominatim answer: hits in Switzerland and Liechtenstein and without position dropped", osm.Count == 1 && osm[0].Label.StartsWith("Lindau (Bodensee)")
+              && osm[0].Lat == 47.5728668 && osm[0].Lon == 9.6961919 && osm[0].E == null && osm[0].Source == Places.Osm, osm.Count + " hits");
+
+        if (args.Contains("online"))
+        {
+            var res = Places.Search("Lindau").GetAwaiter().GetResult();
+            foreach (var h in res.Hits) Console.WriteLine($"     {h.Source,-13} {h.Lat,10:0.00000} {h.Lon,10:0.00000}  {h.Label}");
+            if (res.Note != null) Console.WriteLine("     note: " + res.Note);
+            Check("online: swisstopo finds Lindau ZH", res.Hits.Any(h => h.Source == Places.Swisstopo), "");
+            Check("online: OpenStreetMap finds a Lindau outside Switzerland", res.Hits.Any(h => h.Source == Places.Osm), "");
+            var again = Places.Search("Lindau").GetAwaiter().GetResult();
+            Check("online: second search answered (Nominatim from the cache)", again.Hits.Count == res.Hits.Count, again.Hits.Count + " hits");
         }
 
         Console.WriteLine(_failed == 0 ? "all geo checks passed" : _failed + " geo checks FAILED");

@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Checks src/GeoBimRhino/GeoProj.cs (LV95 and UTM ↔ WGS84, convergence, position parsing)
-       against pyproj 3.7.2 / PROJ 9.5.1, and the embedded geoid grids (Geoid.cs) against PROJ's full
-       grids. Run: dotnet run, with the project folder tests/geo_check -->
+       against pyproj 3.7.2 / PROJ 9.5.1, the embedded geoid grids (Geoid.cs) against PROJ's full grids,
+       and the parsing of swisstopo and Nominatim search answers.
+       Run: dotnet run, with the project folder tests/geo_check; `dotnet run online` also asks both
+       services once (one search each). -->
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -12,6 +14,8 @@
   <ItemGroup>
     <Compile Include="..\..\src\GeoBimRhino\GeoProj.cs" Link="GeoProj.cs" />
     <Compile Include="..\..\src\GeoBimRhino\CrsDetect.cs" Link="CrsDetect.cs" />
+    <Compile Include="..\..\src\GeoBimRhino\GeoAdmin.cs" Link="GeoAdmin.cs" />
+    <Compile Include="..\..\src\GeoBimRhino\Places.cs" Link="Places.cs" />
     <Compile Include="..\..\src\GeoBimRhino\Geoid.cs" Link="Geoid.cs" />
     <EmbeddedResource Include="..\..\src\GeoBimRhino\Resources\geoid\*.bin" LogicalName="GeoBimRhino.geoid.%(Filename)%(Extension)" />
   </ItemGroup>
