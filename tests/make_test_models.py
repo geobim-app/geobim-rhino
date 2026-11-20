@@ -8,10 +8,15 @@
 # EarthAnchorPoint, without georeferencing, in LV95 map coordinates, and local
 # with a map origin (with and without rotation) — saves each as
 # tests/out/<case>.3dm and exports tests/out/<case>.ifc with _-GeoBIMExportIfc.
+# GeoBIMLocation: a local model placed by latitude/longitude ("location"), its GLB
+# placement and Cesium ion IFC, and the ion IFC of the LV95 model ("lv95_ion"); what
+# Rhino stored and printed goes to tests/out/location.json.
 # Log: tests/out/log.txt. Then check the IFCs: python tests/check_exports.py
 
 import os
+import json
 import math
+import re
 import traceback
 import System
 import Rhino
@@ -114,10 +119,84 @@ def run_ion_case():
     log("ion: RunScript=%s, ifc exists=%s" % (ok, os.path.exists(dst)))
 
 
+RESULTS = {}
+
+
+def history_mark():
+    return len(Rhino.RhinoApp.CommandHistoryWindowText)
+
+
+def history_since(mark):
+    return Rhino.RhinoApp.CommandHistoryWindowText[mark:]
+
+
+def numbers_after(text, key):
+    """lon/lat/height printed by the plugin, e.g. 'origin lon 9.47, lat 46.98, 830 m'"""
+    m = re.search(key + r" lon ([-0-9.]+), lat ([-0-9.]+), ([-0-9.]+) m", text)
+    return [float(v) for v in m.groups()] if m else None
+
+
+def ion_ifc(name):
+    """GeoBIMUploadIon with Upload=No: the ion IFC (nothing is sent) and the printed origin"""
+    tmp = os.path.join(System.IO.Path.GetTempPath(), "geobim-rhino", name + "_ion.ifc")
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    mark = history_mark()
+    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMUploadIon _Enter GeoidN=48.7 Upload=No "%s"' % name, False)
+    text = history_since(mark)
+    dst = os.path.join(OUT, name + ".ifc")
+    if os.path.exists(dst):
+        os.remove(dst)
+    if os.path.exists(tmp):
+        os.replace(tmp, dst)
+    log("%s: RunScript=%s, ifc exists=%s" % (name, ok, os.path.exists(dst)))
+    RESULTS[name] = {"origin": numbers_after(text, "origin")}
+    log(text.strip())
+
+
+def run_location_case():
+    """A local model placed with GeoBIMLocation from latitude/longitude (LV95 2755000/1206000, Pfäfers)"""
+    doc = sc.doc
+    doc.Objects.Clear()
+    doc.Strings.Delete("geobim", "mapOrigin")
+    doc.Strings.Delete("geobim", "epsg")
+    doc.EarthAnchorPoint = Rhino.DocObjects.EarthAnchorPoint()
+    build(doc, rg.Vector3d(250, -40, 400), "location")
+    mark = history_mark()
+    ok = Rhino.RhinoApp.RunScript("_-GeoBIMLocation _Enter 46.9869521994,9.4763209037,0 _Enter", False)
+    log("location: GeoBIMLocation RunScript=%s" % ok)
+    log(history_since(mark).strip())
+    ap = doc.EarthAnchorPoint
+    RESULTS["location"] = {
+        "mapOrigin": doc.Strings.GetValue("geobim", "mapOrigin"),
+        "epsg": doc.Strings.GetValue("geobim", "epsg"),
+        "lat": ap.EarthBasepointLatitude, "lon": ap.EarthBasepointLongitude, "elevation": ap.EarthBasepointElevation,
+        "zero": str(ap.EarthBasepointElevationZero),
+        "base": [ap.ModelBasePoint.X, ap.ModelBasePoint.Y, ap.ModelBasePoint.Z],
+        "north": [ap.ModelNorth.X, ap.ModelNorth.Y, ap.ModelNorth.Z], "east": [ap.ModelEast.X, ap.ModelEast.Y, ap.ModelEast.Z],
+    }
+    doc.WriteFile(os.path.join(OUT, "location.3dm"), Rhino.FileIO.FileWriteOptions())
+    ifc = os.path.join(OUT, "location.ifc")
+    if os.path.exists(ifc):
+        os.remove(ifc)
+    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMExportIfc _Enter "%s"' % ifc, False)
+    log("location: IFC RunScript=%s, exists=%s" % (ok, os.path.exists(ifc)))
+    glb = os.path.join(OUT, "location.glb")
+    if os.path.exists(glb):
+        os.remove(glb)
+    mark = history_mark()
+    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMExportGlb _Enter "%s"' % glb, False)
+    text = history_since(mark)
+    m = re.search(r"placement lon ([-0-9.]+), lat ([-0-9.]+), ([-0-9.]+) m above sea level, heading ([-0-9.]+)", text)
+    RESULTS["location_glb"] = {"placement": [float(v) for v in m.groups()] if m else None}
+    log("location: GLB RunScript=%s, exists=%s; %s" % (ok, os.path.exists(glb), text.strip()))
+    ion_ifc("location_ion")
+
+
 def run_case(name, offset, anchor, map_origin=None):
     doc = sc.doc
     doc.Objects.Clear()
-    # map origin of local coordinates (GeoBIMMapOrigin), kept in the document
+    # map origin of local coordinates (GeoBIMLocation), kept in the document
     if map_origin:
         doc.Strings.SetString("geobim", "mapOrigin", map_origin)
     else:
@@ -155,8 +234,12 @@ try:
     # Swiss LV95: the same model once in real map coordinates, once local with a
     # map origin (must give the same absolute coordinates), once with a rotation
     run_case("lv95", rg.Vector3d(2600250, 1199960, 400), False)
+    ion_ifc("lv95_ion")   # map coordinates: placed without any Location
     run_case("origin", rg.Vector3d(250, -40, 400), False, "2600000,1200000,0,0")
     run_case("origin_rot", rg.Vector3d(250, -40, 0), True, "2600000,1200000,400,30")
+    run_location_case()
+    with open(os.path.join(OUT, "location.json"), "w", encoding="utf-8") as fj:
+        json.dump(RESULTS, fj, indent=1)
     log("done")
 except Exception:
     log(traceback.format_exc())

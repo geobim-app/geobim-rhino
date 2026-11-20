@@ -20,6 +20,7 @@ using System.Threading.Tasks;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
+using Rhino.Geometry;
 using Rhino.Input;
 using Rhino.Input.Custom;
 
@@ -77,9 +78,10 @@ namespace GeoBimRhino
         public const string DocFormatKey = "format";
 
         /// <summary>
-        /// Placement for a GLB upload from the EarthAnchorPoint: lon/lat of the model
-        /// origin, height above sea level (the server adds the geoid), heading of
-        /// the model's +Y axis clockwise from true north. Null without a Location.
+        /// Placement for a GLB upload from the model's position (GeoLocation.For: map origin,
+        /// map coordinates or Rhino's Location): lon/lat of the base point, height above sea
+        /// level (the server adds the geoid), heading of the model's +Y axis clockwise from
+        /// true north. Null without a position.
         /// </summary>
         public static GeoBimClient.Placement GlbPlacement(IfcModelData m)
         {
@@ -136,33 +138,35 @@ namespace GeoBimRhino
 
         public static ExportResult Export(RhinoDoc doc, List<RhinoObject> objects, string name, string path, RunMode mode, bool glb = false)
         {
-            // GLB is placed by lat/lon (EarthAnchorPoint); map coordinates would need a
-            // projection the plugin doesn't have, so don't ask for an EPSG code there
-            // and leave the document's map origin to the IFC export
+            // GLB is placed by latitude/longitude (GeoLocation: the map origin or map coordinates
+            // when they convert, else Rhino's Location), so it never asks for an EPSG code
             var mapOrigin = MapOrigin.FromDoc(doc);
-            var res = ModelExport.Build(doc, objects, name, (e, n) => glb ? 0 : ResolveEpsg(doc, e, n, mode), glb ? null : mapOrigin);
+            var res = ModelExport.Build(doc, objects, name, (e, n) => glb ? 0 : ResolveEpsg(doc, e, n, mode), mapOrigin,
+                                        glb ? ExportTarget.Glb : ExportTarget.Ifc);
             if (res.Cancelled) return res;
             if (glb)
             {
-                if (res.Model.GeoRef == GeoRefKind.MapConversion)
-                    throw new InvalidOperationException("GLB needs the model near the origin with a Location (EarthAnchorPoint) — for map coordinates use Format=IFC");
-                if (mapOrigin != null && res.Model.GeoRef != GeoRefKind.SiteLatLon)
-                    RhinoApp.WriteLine("geoBIM.app: GLB is placed by the Location (EarthAnchorPoint), not by the map origin — set a Location or use Format=IFC.");
+                if (res.PlacementNote != null) RhinoApp.WriteLine("geoBIM.app: GLB is placed by Rhino's Location: " + res.PlacementNote + ".");
                 if (res.Elements > 0) GlbWriter.Write(res.Model, path);
             }
             else IfcWriter.Write(res.Model, path);
             RhinoApp.WriteLine(string.Format("geoBIM.app: {0} elements, {1:N0} triangles{2}; {3}",
                 res.Elements, res.Triangles, res.Skipped > 0 ? $", {res.Skipped} objects without surfaces skipped" : "", res.GeoRefInfo));
+            var warn = GeoLocation.MismatchWarning(doc);
+            if (warn != null) RhinoApp.WriteLine(warn);
             return res;
         }
 
-        /// <summary>IFC for Cesium ion: east/north/up around the Location, position in IonLon/IonLat/IonElevation</summary>
+        /// <summary>IFC for Cesium ion: east/north/up around the model's position, which goes to IonLon/IonLat/IonElevation</summary>
         public static ExportResult ExportIon(RhinoDoc doc, List<RhinoObject> objects, string name, string path)
         {
-            var res = ModelExport.Build(doc, objects, name, (e, n) => 0, null, true);
+            var res = ModelExport.Build(doc, objects, name, (e, n) => 0, MapOrigin.FromDoc(doc), ExportTarget.Ion);
+            if (res.PlacementNote != null) RhinoApp.WriteLine("Cesium ion: placed by Rhino's Location: " + res.PlacementNote + ".");
             if (res.Elements > 0) IfcWriter.Write(res.Model, path);
             RhinoApp.WriteLine(string.Format("Cesium ion: {0} elements, {1:N0} triangles{2}; {3}",
                 res.Elements, res.Triangles, res.Skipped > 0 ? $", {res.Skipped} objects without surfaces skipped" : "", res.GeoRefInfo));
+            var warn = GeoLocation.MismatchWarning(doc);
+            if (warn != null) RhinoApp.WriteLine(warn);
             return res;
         }
 
@@ -370,60 +374,300 @@ namespace GeoBimRhino
 
     // ------------------------------------------------------------------
     /// <summary>
-    /// Map origin of this document: the model stays in local coordinates and the
-    /// IFC export writes IfcMapConversion from E0/N0/H0 (and a rotation), so no
-    /// second copy of the model in real map coordinates is needed.
-    /// Scripted: -GeoBIMMapOrigin 2755000,1206000,0,0 or -GeoBIMMapOrigin Clear
+    /// Where the model lies, from one input: a point of the model (Enter = origin) and its
+    /// position — map coordinates, latitude/longitude, a place or address (swisstopo search) or
+    /// a click on the map — then its height and map north. Stores the map origin (IFC export:
+    /// IfcMapConversion) and, for LV95 and UTM, sets Rhino's Location to the same place, so IFC,
+    /// GLB and Cesium ion agree. Options: Map, Show (map with the model's outline), Clear.
+    /// Scripted: _-GeoBIMLocation _Enter 2755000,1206000,0,0   (E,N,H,rotation: nothing else is asked)
+    ///           _-GeoBIMLocation _Enter 46.98695,9.47632,0 _Enter   (latitude, longitude, height; north = +Y)
     /// </summary>
     [Guid("714cd07f-7895-4bf7-a22c-4a77bc5acd3e")]
-    public class GeoBIMMapOriginCommand : Command
+    public class GeoBIMLocationCommand : Command
     {
-        public override string EnglishName => "GeoBIMMapOrigin";
+        public override string EnglishName => "GeoBIMLocation";
+
+        static string F(double v, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture);
 
         protected override Result RunCommand(RhinoDoc doc, RunMode mode)
         {
+            double scale = RhinoMath.UnitScale(doc.ModelUnitSystem, UnitSystem.Meters);
             var current = MapOrigin.FromDoc(doc);
-            RhinoApp.WriteLine(current == null
-                ? "geoBIM.app: this document has no map origin (local coordinates are placed by the Location, if any)."
-                : $"geoBIM.app: map origin of this document: {current.Describe()} — local x = E − E0, y = N − N0, z = H − H0.");
+            RhinoApp.WriteLine(GeoLocation.Describe(doc));
+            var warn = GeoLocation.MismatchWarning(doc);
+            if (warn != null) RhinoApp.WriteLine(warn);
+            var footprint = GeoLocation.Footprint(doc);
+            if (footprint != null)
+            {
+                var c = (footprint[0] + footprint[2]) / 2;
+                if (CrsDetect.LooksLikeMap(c.X * scale, c.Y * scale))
+                    RhinoApp.WriteLine("geoBIM.app: the visible objects already lie in map coordinates — their position is known and GLB and Cesium ion use it. " +
+                                       "GeoBIMLocation is for models in local coordinates (Show displays the position).");
+            }
 
-            var gs = new GetString();
-            gs.SetCommandPrompt("Map coordinates of the model origin E,N[,H[,rotation°]] (Enter keeps)");
-            if (current != null) gs.SetDefaultString(current.ToString());
-            gs.AcceptNothing(true);
-            int optClear = gs.AddOption("Clear");
-            var r = gs.Get();
-            if (r == GetResult.Option && gs.OptionIndex() == optClear)
+            // 1. a point of the model whose position is known
+            var gp = new GetPoint();
+            gp.SetCommandPrompt("Point whose position you know (Enter = model origin 0,0,0)");
+            gp.AcceptNothing(true);
+            int oMap = gp.AddOption("Map");
+            int oShow = gp.AddOption("Show");
+            int oClear = gp.AddOption("Clear");
+            var point = Point3d.Origin;
+            bool openMap = false;
+            var r = gp.Get();
+            if (r == GetResult.Option)
             {
-                MapOrigin.Clear(doc);
-                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
-                return Result.Success;
+                int i = gp.OptionIndex();
+                if (i == oShow) return ShowMap(doc);
+                if (i == oClear)
+                {
+                    MapOrigin.Clear(doc);
+                    RhinoApp.WriteLine("geoBIM.app: map origin removed. Rhino's Location stays as it is (change it with EarthAnchorPoint).");
+                    return Result.Success;
+                }
+                openMap = i == oMap;
             }
-            if (r == GetResult.Nothing) return Result.Success;
-            if (r != GetResult.String) return Result.Cancel;
+            else if (r == GetResult.Point) point = gp.Point();
+            else if (r != GetResult.Nothing) return Result.Cancel;
+            double x = point.X * scale, y = point.Y * scale, z = point.Z * scale;
 
-            var text = gs.StringResult().Trim();
-            if (text.Equals("Clear", StringComparison.OrdinalIgnoreCase))
+            // 2. its position
+            PositionText pos = null;
+            bool online = false;   // position from swisstopo's search or the map: terrain height may be looked up
+            while (pos == null)
             {
-                MapOrigin.Clear(doc);
-                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
-                return Result.Success;
+                if (openMap)
+                {
+                    if (mode != RunMode.Interactive) return Result.Cancel;
+                    var ll = PickOnMap(doc, point, current, scale);
+                    if (ll == null) return Result.Cancel;
+                    pos = new PositionText { Kind = PositionText.Kinds.LatLon, Lat = ll.Value.Lat, Lon = ll.Value.Lon };
+                    online = true;
+                    break;
+                }
+                var gs = new GetString();
+                gs.SetCommandPrompt("Its position: map coordinates E,N[,H], latitude, longitude[, H], or a place or address in Switzerland");
+                string def = null;
+                if (GeoLocation.ModelToMap(doc, point, out double ce, out double cn, out double ch, out _) && current != null)
+                    def = F(ce, "0.###") + "," + F(cn, "0.###") + "," + F(ch, "0.###");
+                if (def != null) gs.SetDefaultString(def);
+                gs.AcceptNothing(true);
+                int oMap2 = gs.AddOption("Map");
+                var gr = gs.GetLiteralString();
+                if (gr == GetResult.Option && gs.OptionIndex() == oMap2) { openMap = true; continue; }
+                string text;
+                if (gr == GetResult.String) text = gs.StringResult().Trim();
+                else if (gr == GetResult.Nothing && def != null) text = def;
+                else return Result.Cancel;
+                if (text.Length == 0 && def != null) text = def;
+
+                var parsed = PositionText.Parse(text);
+                if (parsed == null)
+                {
+                    RhinoApp.WriteLine("geoBIM.app: \"{0}\" is not a position — e.g. 2755000,1206000 (LV95), 46.98695, 9.47632 (latitude, longitude) or Valens.", text);
+                    if (mode != RunMode.Interactive) return Result.Failure;
+                    continue;
+                }
+                if (parsed.Kind == PositionText.Kinds.Address)
+                {
+                    var hit = SearchAddress(parsed.Address, mode);
+                    if (hit == null) { if (mode != RunMode.Interactive) return Result.Failure; continue; }
+                    parsed = new PositionText { Kind = PositionText.Kinds.Map, E = hit.E, N = hit.N };
+                    online = true;
+                }
+                pos = parsed;
             }
-            var mo = MapOrigin.Parse(text);
-            if (mo == null)
+
+            // 3. coordinate system and map coordinates of the point
+            int epsg;
+            double e, n;
+            int? fixedEpsg = FixedEpsg();
+            if (pos.Kind == PositionText.Kinds.Map)
             {
-                RhinoApp.WriteLine("geoBIM.app: expected E,N[,H[,rotation]] in metres and degrees, e.g. 2755000,1206000,0,0");
-                return Result.Failure;
+                e = pos.E;
+                n = pos.N;
+                var guess = CrsDetect.Guess(e, n, GeoBimPlugin.Instance.DefaultUtmEpsg);
+                int? chosen = fixedEpsg ?? guess.Epsg ?? Shared.ResolveEpsg(doc, e, n, mode);
+                if (chosen == null) return Result.Cancel;
+                epsg = chosen.Value;
             }
-            if (!CrsDetect.LooksLikeMap(mo.E, mo.N))
+            else
             {
-                RhinoApp.WriteLine("geoBIM.app: E {0:0} N {1:0} are not map coordinates (more than 100 km from 0 expected).", mo.E, mo.N);
-                return Result.Failure;
+                int? chosen = fixedEpsg != null && GeoProj.Supports(fixedEpsg.Value) ? fixedEpsg : GeoProj.DefaultEpsg(pos.Lat, pos.Lon);
+                if (chosen == null)
+                {
+                    RhinoApp.WriteLine("geoBIM.app: positions south of the equator need map coordinates (the plugin converts LV95 and northern UTM zones).");
+                    return Result.Failure;
+                }
+                epsg = chosen.Value;
+                GeoProj.ToMap(epsg, pos.Lat, pos.Lon, out e, out n);
             }
-            mo.Save(doc);
-            var guess = CrsDetect.Guess(mo.E, mo.N, GeoBimPlugin.Instance.DefaultUtmEpsg);
-            RhinoApp.WriteLine("geoBIM.app: map origin set to {0}{1}. The IFC export writes IfcMapConversion; GLB still uses the Location.",
-                mo.Describe(), guess.Epsg != null ? $" (EPSG:{guess.Epsg}, {guess.Region})" : $" ({guess.Region}: the coordinate system is asked on export)");
+            RhinoApp.WriteLine(string.Format("geoBIM.app: {0} (EPSG:{1}) E {2} N {3}.", GeoProj.Name(epsg), epsg, F(e, "0.###"), F(n, "0.###")));
+
+            // 4. height of the point above sea level
+            double h;
+            if (pos.H != null) h = pos.H.Value;
+            else
+            {
+                double? terrain = null;
+                if (online && epsg == 2056 && GeoAdmin.InSwitzerland(e, n))
+                {
+                    try { terrain = Task.Run(() => GeoAdmin.Height(e, n)).GetAwaiter().GetResult(); } catch { terrain = null; }
+                    if (terrain != null) RhinoApp.WriteLine("geoBIM.app: terrain there: {0} m above sea level (swisstopo).", F(terrain.Value, "0.0"));
+                }
+                // keep the heights the model already has, else start from the terrain
+                double minZ = footprint != null ? footprint[0].Z * scale : 0;
+                double defH = current != null ? current.H + z : (minZ > 100 || terrain == null ? z : terrain.Value);
+                var gn = new GetNumber();
+                gn.SetCommandPrompt(string.Format(CultureInfo.InvariantCulture,
+                    "Height of this point above sea level in metres (its z is {0:0.###} m)", z));
+                gn.SetDefaultNumber(defH);
+                gn.AcceptNothing(true);
+                int oTerrain = terrain != null ? gn.AddOption("Terrain") : -1;
+                int oModel = gn.AddOption("ModelHeights");
+                while (true)
+                {
+                    var hr = gn.Get();
+                    if (hr == GetResult.Number) { h = gn.Number(); break; }
+                    if (hr == GetResult.Nothing) { h = defH; break; }
+                    if (hr == GetResult.Option && gn.OptionIndex() == oTerrain) { h = terrain.Value; break; }
+                    if (hr == GetResult.Option && gn.OptionIndex() == oModel) { h = z; break; }   // z values are heights above sea level
+                    return Result.Cancel;
+                }
+            }
+
+            // 5. map north
+            double rot;
+            if (pos.RotationDeg != null) rot = pos.RotationDeg.Value;
+            else
+            {
+                double defRot = current?.RotationDeg ?? 0;
+                var gn = new GetNumber();
+                gn.SetCommandPrompt("Map north in the model, degrees clockwise from +Y");
+                gn.SetDefaultNumber(defRot);
+                gn.AcceptNothing(true);
+                int oTwo = gn.AddOption("TwoPoints");
+                while (true)
+                {
+                    var nr = gn.Get();
+                    if (nr == GetResult.Number) { rot = gn.Number(); break; }
+                    if (nr == GetResult.Nothing) { rot = defRot; break; }
+                    if (nr == GetResult.Option && gn.OptionIndex() == oTwo)
+                    {
+                        var a = new GetPoint();
+                        a.SetCommandPrompt("Start of a line pointing to map north");
+                        if (a.Get() != GetResult.Point) return Result.Cancel;
+                        var b = new GetPoint();
+                        b.SetCommandPrompt("Point towards map north");
+                        b.SetBasePoint(a.Point(), true);
+                        b.DrawLineFromPoint(a.Point(), true);
+                        if (b.Get() != GetResult.Point) return Result.Cancel;
+                        var d = b.Point() - a.Point();
+                        if (Math.Abs(d.X) < 1e-12 && Math.Abs(d.Y) < 1e-12) return Result.Cancel;
+                        rot = Math.Atan2(d.X, d.Y) * 180 / Math.PI;
+                        break;
+                    }
+                    return Result.Cancel;
+                }
+            }
+            rot = Math.IEEERemainder(rot, 360);
+
+            // 6. map origin from the point, Rhino's Location from the map origin
+            double t = rot * Math.PI / 180, cr = Math.Cos(t), sr = Math.Sin(t);
+            var mo = new MapOrigin { E = e - (cr * x - sr * y), N = n - (sr * x + cr * y), H = h - z, RotationDeg = rot };
+            bool located = GeoLocation.Apply(doc, mo, epsg);
+            RhinoApp.WriteLine("geoBIM.app: model origin at {0} {1}{2}.", GeoProj.Name(epsg), mo.Describe(),
+                rot != 0 ? "" : ", map north = +Y");
+            if (located)
+            {
+                var ap = doc.EarthAnchorPoint;
+                RhinoApp.WriteLine(string.Format("geoBIM.app: Rhino's Location set to the same place ({0}° N, {1}° E, {2} m; true north {3}° from map north). " +
+                                   "IFC, GLB and Cesium ion now agree — check it with GeoBIMLocation → Show.",
+                    F(ap.EarthBasepointLatitude, "0.000000"), F(ap.EarthBasepointLongitude, "0.000000"), F(ap.EarthBasepointElevation, "0.##"),
+                    F(GeoProj.Convergence(epsg, ap.EarthBasepointLatitude, ap.EarthBasepointLongitude), "0.###")));
+            }
+            else
+                RhinoApp.WriteLine("geoBIM.app: EPSG:{0} cannot be converted to latitude/longitude by the plugin (it does LV95 and UTM), so Rhino's Location is unchanged; " +
+                                   "the IFC export uses the map origin. For GLB and Cesium ion set the Location with EarthAnchorPoint.", epsg);
+            return Result.Success;
+        }
+
+        static int? FixedEpsg()
+        {
+            var setting = (GeoBimPlugin.Instance.Epsg ?? "auto").Replace("EPSG:", "").Trim();
+            return !setting.Equals("auto", StringComparison.OrdinalIgnoreCase) && int.TryParse(setting, out int code) ? code : (int?)null;
+        }
+
+        /// <summary>swisstopo search; with several hits the user picks one (scripts: the first). Null when nothing was chosen.</summary>
+        static GeoAdmin.Hit SearchAddress(string text, RunMode mode)
+        {
+            List<GeoAdmin.Hit> hits;
+            try { hits = Task.Run(() => GeoAdmin.Search(text)).GetAwaiter().GetResult(); }
+            catch (Exception ex)
+            {
+                RhinoApp.WriteLine("geoBIM.app: swisstopo search failed — {0}", (ex as AggregateException)?.InnerException?.Message ?? ex.Message);
+                return null;
+            }
+            if (hits.Count == 0)
+            {
+                RhinoApp.WriteLine("geoBIM.app: swisstopo found nothing for \"{0}\" (it searches Switzerland and Liechtenstein; elsewhere use latitude, longitude or Map).", text);
+                return null;
+            }
+            for (int i = 0; i < hits.Count; i++)
+                RhinoApp.WriteLine(string.Format("  {0}  {1}   (E {2} N {3})", i + 1, hits[i].Label, F(hits[i].E, "0"), F(hits[i].N, "0")));
+            int pick = 1;
+            if (hits.Count > 1 && mode == RunMode.Interactive &&
+                RhinoGet.GetInteger("Which one", true, ref pick, 1, hits.Count) != Result.Success) return null;
+            var hit = hits[pick - 1];
+            RhinoApp.WriteLine("geoBIM.app: {0}.", hit.Label);
+            return hit;
+        }
+
+        /// <summary>Map with the marker on the point's current position and the model's outline around it</summary>
+        static (double Lat, double Lon)? PickOnMap(RhinoDoc doc, Point3d point, MapOrigin current, double scale)
+        {
+            var o = new MapPicker.Options { Title = "geoBIM.app — where is this point? Click it on the map", Pick = true };
+            if (GeoLocation.ModelToLatLon(doc, point, out double lat, out double lon)) { o.Lat = lat; o.Lon = lon; }
+            o.Swiss = o.Lat == null || GeoProj.DefaultEpsg(o.Lat.Value, o.Lon.Value) == 2056;
+            var fp = GeoLocation.Footprint(doc);
+            if (fp != null)
+            {
+                double t = (current?.RotationDeg ?? 0) * Math.PI / 180, c = Math.Cos(t), s = Math.Sin(t);
+                o.Outline = new List<(double, double)>();
+                foreach (var q in fp)
+                {
+                    double dx = (q.X - point.X) * scale, dy = (q.Y - point.Y) * scale;
+                    o.Outline.Add((c * dx - s * dy, s * dx + c * dy));
+                }
+            }
+            return MapPicker.Show(o);
+        }
+
+        static Result ShowMap(RhinoDoc doc)
+        {
+            var fp = GeoLocation.Footprint(doc);
+            var o = new MapPicker.Options { Title = "geoBIM.app — position of " + Shared.DocName(doc), Pick = false };
+            var marker = Point3d.Origin;
+            if (fp != null)
+            {
+                double scale = RhinoMath.UnitScale(doc.ModelUnitSystem, UnitSystem.Meters);
+                var c = (fp[0] + fp[2]) / 2;
+                if (CrsDetect.LooksLikeMap(c.X * scale, c.Y * scale)) marker = c;
+                o.OutlineLatLon = new List<(double, double)>();
+                foreach (var q in fp)
+                    if (GeoLocation.ModelToLatLon(doc, q, out double qa, out double qo)) o.OutlineLatLon.Add((qa, qo));
+                if (o.OutlineLatLon.Count < 3) o.OutlineLatLon = null;
+            }
+            if (!GeoLocation.ModelToLatLon(doc, marker, out double lat, out double lon))
+            {
+                RhinoApp.WriteLine("geoBIM.app: this model has no position yet — run GeoBIMLocation.");
+                return Result.Nothing;
+            }
+            o.Lat = lat;
+            o.Lon = lon;
+            o.Swiss = GeoProj.DefaultEpsg(lat, lon) == 2056;
+            RhinoApp.WriteLine("geoBIM.app: {0} at {1}° N, {2}° E.", marker == Point3d.Origin ? "model origin" : "model centre", F(lat, "0.000000"), F(lon, "0.000000"));
+            MapPicker.Show(o);
             return Result.Success;
         }
     }
@@ -679,9 +923,10 @@ namespace GeoBimRhino
     // ------------------------------------------------------------------
     /// <summary>
     /// Upload to Cesium ion: the selection becomes an IFC in east/north/up metres
-    /// around the Location (EarthAnchorPoint), ion's BIM/CAD tiler places its origin
-    /// at the Location's lon/lat and the height above sea level plus the geoid
-    /// undulation N (ion heights are ellipsoidal). Every upload is a new ion asset.
+    /// around the model's position (GeoLocation.For: map origin, map coordinates or
+    /// Rhino's Location); ion's BIM/CAD tiler places its origin at that lon/lat and
+    /// the height above sea level plus the geoid undulation N (ion heights are
+    /// ellipsoidal). Every upload is a new ion asset.
     /// Scripted: _-GeoBIMUploadIon _Enter GeoidN=48.7 "name"
     /// </summary>
     [Guid("d192ead3-ee5e-4009-9cb6-a78788f1f712")]
@@ -691,12 +936,19 @@ namespace GeoBimRhino
 
         static int _busy;
 
+        static bool InMapCoordinates(RhinoDoc doc)
+        {
+            var fp = GeoLocation.Footprint(doc);
+            double scale = RhinoMath.UnitScale(doc.ModelUnitSystem, UnitSystem.Meters);
+            return fp != null && CrsDetect.LooksLikeMap((fp[0].X + fp[2].X) / 2 * scale, (fp[0].Y + fp[2].Y) / 2 * scale);
+        }
+
         protected override Result RunCommand(RhinoDoc doc, RunMode mode)
         {
             var p = GeoBimPlugin.Instance;
-            if (!doc.EarthAnchorPoint.EarthLocationIsSet())
+            if (MapOrigin.FromDoc(doc) == null && !doc.EarthAnchorPoint.EarthLocationIsSet() && !InMapCoordinates(doc))
             {
-                RhinoApp.WriteLine("Cesium ion: this document has no Location — set it with the EarthAnchorPoint command (the model base point and model north place the model).");
+                RhinoApp.WriteLine("Cesium ion: this model has no position yet — set it with GeoBIMLocation.");
                 return Result.Cancel;
             }
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
@@ -776,7 +1028,7 @@ namespace GeoBimRhino
                     return Result.Cancel;
                 }
                 string description = string.Format(CultureInfo.InvariantCulture,
-                    "Uploaded from Rhino ({0}) with geoBIM.app for Rhino {1}. Origin at the Location {2:0.0000000}, {3:0.0000000}, " +
+                    "Uploaded from Rhino ({0}) with geoBIM.app for Rhino {1}. Origin at {2:0.0000000}, {3:0.0000000}, " +
                     "{4:0.###} m above sea level + geoid N {5:0.###} m = {6:0.###} m ellipsoidal.",
                     Shared.DocName(doc), GeoBimPlugin.PluginVersion, res.IonLat, res.IonLon, res.IonElevation, geoidN, height);
 

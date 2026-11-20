@@ -33,10 +33,41 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 | `GeoBIMExportIfc` | Writes the IFC only (`-GeoBIMExportIfc` takes the file name on the command line, for scripts). |
 | `GeoBIMExportGlb` | Writes the GLB only (`-GeoBIMExportGlb` likewise) and prints the placement it would send. |
 | `GeoBIMOpen` | Opens the document's model (or the server) in the browser. |
-| `GeoBIMMapOrigin` | Map coordinates E,N[,H[,rotation]] of the model origin for models drawn in local coordinates (see *Georeferencing*); `Clear` removes them. Scripted: `-GeoBIMMapOrigin 2755000,1206000,0,0`. |
+| `GeoBIMLocation` | Where the model lies, in one step (see *Where the model lies*): a point of the model and its position — map coordinates, latitude/longitude, a place or address, or a click on the map — then height and map north. Sets the map origin and Rhino's Location together. `Show` displays the model's outline on the map, `Clear` removes the map origin. Scripted: `-GeoBIMLocation _Enter 2755000,1206000,0,0`. |
 | `GeoBIMUploadIon` | Uploads the selection to **Cesium ion** as a new 3D Tiles asset (see below). |
 | `GeoBIMSettings` | Server, token, EPSG, connection test; `IonToken` / `IonTest` for Cesium ion. |
-| `GeoBIMToolbar` | Shows the geoBIM.app toolbar. Left / right click: **geoBIM.app** (upload / open in the browser), **Cesium ion** (upload / ion token), **Export** (IFC / GLB), **Map origin** (map origin / Rhino's Location), **Settings** (settings / test the connections). |
+| `GeoBIMToolbar` | Shows the geoBIM.app toolbar. Left / right click: **geoBIM.app** (upload / open in the browser), **Cesium ion** (upload / ion token), **Export** (IFC / GLB), **Location** (set the position / show it on the map), **Settings** (settings / test the connections). |
+
+## Where the model lies (once per model)
+
+`GeoBIMLocation` (toolbar: **Location**) asks for:
+
+1. **A point of the model whose position you know.** Enter takes the model origin 0,0,0; otherwise click a survey
+   point or a building corner.
+2. **Its position**, in whatever form you have it:
+   - map coordinates `2755000, 1206000` (LV95; also `2'755'000.00, 1'206'000.00` as map.geo.admin.ch copies them),
+     UTM with or without zone prefix, Gauss-Krüger, …;
+   - latitude, longitude `46.98695, 9.47632` (Google Maps: right-click → copy) or `46°59'13"N 9°28'35"E`;
+   - a place or address in Switzerland (`Valens`, `Bahnhofstrasse 1 Zürich`): swisstopo's search, pick from the list;
+   - **Map**: click the point on a map (swisstopo's map and aerial images, BKG TopPlusOpen elsewhere, search box);
+     the model's outline follows the marker.
+3. **The height** of that point above sea level. Enter keeps the model's z values as heights above sea level;
+   after a search or a map click `Terrain` takes swisstopo's terrain height.
+4. **Map north** in degrees clockwise from +Y (Enter: +Y is north); `TwoPoints` picks a line pointing north.
+
+The plugin stores the map origin (the IFC gets `IfcMapConversion`) and sets Rhino's **Location** to the same place,
+with true north from the meridian convergence (about 1.5° in eastern Switzerland). IFC, GLB and Cesium ion then
+land in the same place; exports warn if the map origin and Rhino's Location were changed apart. Right-click the
+**Location** button (or `GeoBIMLocation` → `Show`) to see the model's outline on the map.
+
+The plugin converts between latitude/longitude and map coordinates itself for **LV95 and UTM** (ETRS89/WGS84,
+northern hemisphere), to well below a millimetre against pyproj. Other systems (Gauss-Krüger, LV03, Austria) still
+work for the IFC via the map origin; GLB and Cesium ion then need Rhino's Location set separately
+(`EarthAnchorPoint`). Models drawn in map coordinates need none of this: their position is known, and GLB and
+Cesium ion are placed from it too (LV95, UTM).
+
+Network: the address search and `Terrain` ask swisstopo's geo.admin.ch API; the map window loads Leaflet from unpkg
+and map tiles from swisstopo and BKG. Typed coordinates are converted offline.
 
 ## GLB instead of IFC
 
@@ -49,10 +80,9 @@ properties: `GeoBIMUpload` → *Format = GLB* (needs a geoBIM.app with GLB uploa
   geoBIM.app). Objects without a render material get their display colour, matt.
 - **Geometry**: render meshes with vertex normals, one glTF node per Rhino object (blocks resolved),
   name, layer and user text as node `extras`.
-- **Placement** from the *Location* (EarthAnchorPoint): lon/lat of the model base point, its height
-  above sea level (the server adds the geoid: GCG2016 in Germany, EGM2008 elsewhere) and model north
-  as heading. Without a Location geoBIM.app places it at the centre of the view; models in map
-  coordinates need *Format = IFC*.
+- **Placement** from the model's position (see *Where the model lies*): lon/lat of the model centre, its
+  height above sea level (the server adds the geoid: GCG2016 in Germany, EGM2008 elsewhere) and true north
+  as heading. Without a position geoBIM.app places it at the centre of the view.
 
 ## Cesium ion
 
@@ -65,9 +95,9 @@ ion's BIM/CAD tiler turns it into a 3D Tiles asset.
   the write permission are tested right away. Without `assets:write` ion refuses uploads with a
   misleading `404 ResourceNotFound`; the plugin says what is missing. A Cesium ion token pasted
   into `Token` (the geoBIM.app plugin token) is recognised and stored as ion token.
-- **Placement** from the *Location* (EarthAnchorPoint), which is required: the IFC is written in
-  east/north/up metres around the model base point (model north turned to +Y), and ion puts its
-  origin at the Location's longitude/latitude.
+- **Placement** from the model's position (see *Where the model lies*), which is required: the IFC is
+  written in east/north/up metres around the model centre (true north turned to +Y), and ion puts its
+  origin at that point's longitude/latitude.
 - **Height**: ion works with heights above the ellipsoid, Rhino's Location with heights above sea
   level. `GeoidN` (asked once, remembered in the document) is the geoid undulation at the site,
   e.g. about 48.7 m in eastern Switzerland; the origin goes to *elevation + GeoidN*.
@@ -93,13 +123,13 @@ ion's BIM/CAD tiler turns it into a 3D Tiles asset.
 
 ## Georeferencing (automatic)
 
-0. **Map origin** (`GeoBIMMapOrigin`): the model is drawn in small local coordinates
+0. **Map origin** (`GeoBIMLocation`): the model is drawn in small local coordinates
    (x = E − E0, y = N − N0, z = H − H0) and the document remembers E0/N0/H0 and an optional
    rotation (angle of the local x axis counter-clockwise from map east). The IFC export writes
    `IfcMapConversion` from them and leaves the geometry as it is, so there is no need for a second
    copy of the model moved to real map coordinates. The EPSG code is found as for map coordinates
    below (LV95 → 2056). If the geometry already lies in map coordinates the map origin is ignored
-   (with a note). GLB is still placed by the Location (EarthAnchorPoint).
+   (with a note). GLB and Cesium ion use the same position (see *Where the model lies*).
 1. **Map coordinates** — model centre more than 100 km from the origin: geometry relative to a
    rounded origin (keeps millimetres), `IfcMapConversion` + `IfcProjectedCRS "EPSG:<code>"`.
    With EPSG `auto` the plugin recognises:
@@ -134,19 +164,22 @@ cannot be replaced.
 
 ## Test
 
-`tests/make_test_models.py` builds the same small model in six cases (UTM map coordinates,
+`tests/make_test_models.py` builds the same small model in seven cases (UTM map coordinates,
 EarthAnchorPoint, no georeferencing, LV95 map coordinates, local with a map origin, local with a
-rotated map origin) inside Rhino and exports each with `-GeoBIMExportIfc`, plus the Cesium ion IFC
-of the EarthAnchorPoint case (`-GeoBIMUploadIon … Upload=No`, nothing is sent):
+rotated map origin, local placed with `-GeoBIMLocation` from latitude/longitude) inside Rhino and
+exports each with `-GeoBIMExportIfc`, plus Cesium ion IFCs (`-GeoBIMUploadIon … Upload=No`, nothing
+is sent) and the GLB placement:
 
 ```
 "C:\Program Files\Rhino 8\System\Rhino.exe" /nosplash /runscript="_-RunPythonScript ""<repo>\tests\make_test_models.py"""
 python tests/check_exports.py
 ```
 
-Output in `tests/out/` (not in git). `check_exports.py` validates every IFC with IfcOpenShell and
+Output in `tests/out/` (not in git). `check_exports.py` validates every IFC with IfcOpenShell,
 checks that the map-origin cases give the same absolute coordinates as the model in real LV95
-coordinates. The geobim-tiler can tile them as well
+coordinates, and checks the positions `GeoBIMLocation` sets, the GLB placement and the ion frames
+against pyproj. `dotnet run` in `tests/geo_check` checks the plugin's own LV95/UTM conversion
+against pyproj. The geobim-tiler can tile them as well
 (`geobim_tile.py tests/out/utm.ifc --out tests/out/tiles_utm`).
 
 ## License

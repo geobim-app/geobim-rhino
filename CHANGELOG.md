@@ -7,14 +7,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Map origin for local coordinates** (`MapOrigin.cs`, `ModelExport.cs`, `Commands.cs`): new command
-  `GeoBIMMapOrigin` stores E0, N0, H0 and an optional rotation in the document (`doc.Strings`
-  `geobim/mapOrigin`). The IFC export then writes `IfcMapConversion` from them (Eastings/Northings/
+- **Map origin for local coordinates** (`MapOrigin.cs`, `ModelExport.cs`, `Commands.cs`): the document
+  stores E0, N0, H0 and an optional rotation (`doc.Strings` `geobim/mapOrigin`, set with `GeoBIMLocation`). The IFC export then writes `IfcMapConversion` from them (Eastings/Northings/
   OrthogonalHeight, XAxisAbscissa/Ordinate) and leaves the local geometry as it is. A model no longer
   needs a second copy shifted to real map coordinates. Geometry that already lies in map coordinates
   ignores the map origin; GLB is still placed by the EarthAnchorPoint. `GeoBIMSettings` shows the
   document's map origin. Idea from EarthLink (github.com/J1mmywzh/EarthLink, MIT): the placement is
   data kept with the document, the geometry never moves.
+- **One position for every export: `GeoBIMLocation`** (`GeoLocation.cs`, `GeoProj.cs`, `GeoAdmin.cs`,
+  `MapPicker.cs`, `Commands.cs`): one command says where the model lies. Pick a point of the model (Enter = origin)
+  and give its position as map coordinates, latitude/longitude (as Google Maps or map.geo.admin.ch copy them, also
+  degrees/minutes/seconds), a place or address in Switzerland (swisstopo search) or a click on a map window
+  (swisstopo map and aerial images, BKG TopPlusOpen, the model's outline follows the marker); then the height
+  (`Terrain`: swisstopo's terrain height after a search or map click) and map north (`TwoPoints`). It stores the
+  map origin and the coordinate system and sets Rhino's Location to the same place, with true north from the
+  meridian convergence. `Show` displays the model's outline on the map. Replaces `GeoBIMMapOrigin` (never
+  released). The plugin converts LV95 (Swiss oblique Mercator, CH1903+ → WGS84 as EPSG:1676) and UTM (ETRS89/WGS84,
+  Krüger series) itself; `tests/geo_check` checks it against pyproj (below 0.2 mm, convergence to 0.00001°).
+  - **GLB and Cesium ion follow the map position**: they take latitude/longitude and true north from the map
+    origin, or from the map coordinates of models drawn in LV95/UTM (base point: the model centre rounded to
+    metres), and fall back to Rhino's Location only for other systems. Models in map coordinates can now be
+    uploaded as GLB and to Cesium ion without setting a Location. Exports warn when Rhino's Location and the map
+    origin are more than 0.5 m or 0.05° apart.
 - **Test cases** `lv95`, `origin`, `origin_rot` in `tests/make_test_models.py` and
   `tests/check_exports.py`, which validates all test IFCs with IfcOpenShell and compares the absolute
   coordinates of the map-origin cases with the model in real LV95 coordinates.
@@ -24,11 +38,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `GeoBIMUploadIon` creates a 3D Tiles asset (`sourceType` `BIM_CAD`, as lab.geobim.app's
   `uploadToIon`), uploads the IFC to ion's S3 location (own AWS Signature V4, no AWS SDK), completes
   the upload and follows the tiling until the asset is ready. The IFC is written in east/north/up
-  metres around the EarthAnchorPoint (model north turned to +Y, no heading needed); the origin goes
-  to the Location's lon/lat at the elevation plus the document's geoid undulation `GeoidN`.
+  metres around the model's position (true north turned to +Y, no heading needed); the origin goes
+  to its lon/lat at the height above sea level plus the document's geoid undulation `GeoidN`.
   `GeoBIMSettings` gains `IonToken` and `IonTest`. `tests/sigv4_check` checks the signature against
   AWS's published S3 examples (`dotnet run`, both pass); `tests/make_test_models.py` writes the ion
-  IFC of the EarthAnchorPoint case (`Upload=No`) and `check_exports.py` checks it.
+  IFCs of the EarthAnchorPoint, `GeoBIMLocation` and LV95 cases (`Upload=No`) and `check_exports.py` checks them.
   - **Write permission**: `IonTest` checks it without creating anything (an empty `POST /v1/assets`).
     Ion answers writes of a token without `assets:write` with `404 ResourceNotFound`
     (`/v1/assets?assetRegion=us-east-1`), not 403 — seen on 2026-11-19 with a read-only token; upload
@@ -43,8 +57,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     0.13 m / 0.08 m from the LV95 position computed with pyproj.
 - **Toolbar in Rhino 8 style** (`tools/make_icons.py`, `tools/make_rui.py`, `tools/icons/`): five buttons,
   each with a left and a right click as in Rhino's own toolbars — **geoBIM.app** (upload / open in the
-  browser), **Cesium ion** (upload / ion token), **Export** (IFC / GLB), **Map origin** (map origin /
-  Rhino's Location), **Settings** (settings / test both connections). The icons are drawn by
+  browser), **Cesium ion** (upload / ion token), **Export** (IFC / GLB), **Location**
+  (`GeoBIMLocation` / show the position on the map), **Settings** (settings / test both connections). The icons are drawn by
   `make_icons.py` like Rhino's: filled shapes with a dark outline — the geoBIM logo, the Earth, an IFC
   page, a map pin on a construction grid with the red and green axes, a gear — with an orange badge for
   upload and a green one for export. They are embedded in the `.rui` as SVG for light and dark mode, so

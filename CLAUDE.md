@@ -13,10 +13,13 @@ what changed recently.
   closing someone's Rhino.
 - Test models: `"C:\Program Files\Rhino 8\System\Rhino.exe" /nosplash /runscript="_-RunPythonScript ""<repo>\tests\make_test_models.py"""`
   builds the same small model in every georeferencing case (UTM, EarthAnchorPoint, none, LV95, map origin, map
-  origin rotated), exports `tests/out/<case>.ifc` plus the
-  Cesium ion IFC of the EarthAnchorPoint case (`ion.ifc`, nothing is sent) and closes Rhino. Then run `python tests/check_exports.py`
-  (system Python with ifcopenshell 0.9). It validates the schema and compares absolute coordinates between the
-  cases. Exit code 0 means everything passed.
+  origin rotated, placed with `GeoBIMLocation`), exports `tests/out/<case>.ifc` plus Cesium ion IFCs (`ion.ifc`,
+  `location_ion.ifc`, `lv95_ion.ifc`; nothing is sent), the GLB placement and `location.json`, and closes Rhino.
+  Then run `python tests/check_exports.py` (system Python with ifcopenshell 0.9 and pyproj). It validates the
+  schema, compares absolute coordinates between the cases and checks positions, true north and the ion frames
+  against pyproj. Exit code 0 means everything passed.
+- Projection maths: `dotnet run` in `tests/geo_check` checks `GeoProj.cs` (LV95, UTM, convergence, parsing of
+  typed positions) against pyproj values; all must pass (well below a millimetre).
 - Toolbar: `python tools/make_icons.py && python tools/make_rui.py`. Buttons and their left/right macros are in
   `BUTTONS` in `make_rui.py`; the icons are drawn in `make_icons.py` (SVG for light and dark mode in
   `tools/icons/`, PNG strips as fallback). The SVG goes into the `.rui` as real XML inside `<icon><light>`/`<dark>`:
@@ -32,6 +35,10 @@ what changed recently.
 | `Commands.cs` | All commands; `Shared` holds selection, EPSG resolution and the export entry point |
 | `ModelExport.cs` | Rhino objects → `IfcModelData`: blocks resolved, meshing, georeferencing decision |
 | `MapOrigin.cs` | Map origin of local coordinates, stored in the document |
+| `GeoLocation.cs` | One position for all exports: placement for GLB/ion, setting map origin and Rhino's Location together, mismatch check |
+| `GeoProj.cs` | LV95 and UTM ↔ WGS84, meridian convergence, parsing typed positions (no Rhino types) |
+| `GeoAdmin.cs` | swisstopo search and terrain height (geo.admin.ch API, Switzerland) |
+| `MapPicker.cs` | Map window (Eto WebView, Leaflet, swisstopo and BKG tiles) to pick or show the position |
 | `CrsDetect.cs` | Which EPSG code map coordinates belong to (no Rhino types) |
 | `IfcWriter.cs` | IFC 4 STEP writer without external libraries; also defines `IfcModelData` |
 | `GlbWriter.cs` | Binary glTF 2.0 with PBR materials |
@@ -45,7 +52,10 @@ Georeferencing order in `ModelExport.Build`:
 3. The EarthAnchorPoint. This writes `IfcSite` lat/lon and TrueNorth.
 4. Nothing.
 
-GLB and Cesium ion are placed by the EarthAnchorPoint, because the plugin has no map projection.
+GLB and Cesium ion are placed by latitude/longitude from `GeoLocation.For`: the map origin or the map coordinates
+when their coordinate system converts (LV95, UTM; `GeoProj`), else Rhino's Location (EarthAnchorPoint). The base
+point is the model centre rounded to metres; true north includes the meridian convergence. `GeoBIMLocation` sets
+the map origin and Rhino's Location from one input, so all formats agree; exports warn when they differ.
 
 ## Where settings live
 
@@ -56,7 +66,7 @@ GLB and Cesium ion are placed by the EarthAnchorPoint, because the plugin has no
   | `slug\|<server>` | IFC model on that geoBIM.app server |
   | `glbslug\|<server>` | GLB model on that server |
   | `format` | `ifc` or `glb` |
-  | `epsg` | EPSG chosen for this document |
+  | `epsg` | EPSG chosen for this document (also set by `GeoBIMLocation`) |
   | `mapOrigin` | `E,N,H,rotationDeg` |
   | `geoidN` | geoid undulation for Cesium ion |
   | `ionasset` | last Cesium ion asset id |
@@ -76,6 +86,9 @@ GLB and Cesium ion are placed by the EarthAnchorPoint, because the plugin has no
   - Never put tokens into files, test output or commit messages.
 - **Dependencies:** no NuGet packages besides RhinoCommon without asking. The plugin ships as one `.rhp` (plus
   `.rui`).
+- **External services besides the upload targets** are called only on the user's action: swisstopo's search and
+  height service (`GeoAdmin.cs`) when they search an address or pick on the map; the map window loads Leaflet from
+  unpkg (version and SRI hash pinned) and tiles from swisstopo and BKG.
 - **Compatibility:**
   - Keep the plugin GUID and the command GUIDs. Rhino and the Package Manager identify the plugin by them.
   - New commands get a new GUID.
@@ -97,7 +110,8 @@ GLB and Cesium ion are placed by the EarthAnchorPoint, because the plugin has no
    `GeoBIMUpload` replaces the document's model by default.
 5. **Use the scripted forms for automation:**
    - `_SelNone _-GeoBIMExportIfc _Enter "<path>.ifc" _Enter`
-   - `_-GeoBIMMapOrigin 2755000,1206000,0,0`
+   - `_-GeoBIMLocation _Enter 2755000,1206000,0,0` (E,N,H,rotation of the model origin; nothing else is asked)
+   - `_-GeoBIMLocation _Enter 46.98695,9.47632,0 _Enter` (latitude, longitude, height; map north = +Y)
 6. **If Rhino stops responding,** stop driving it and ask before restarting it.
 
 ## Git and releases

@@ -44,7 +44,7 @@
       </tool_bar_item>
       <tool_bar_item guid="3cae18e1-84c2-5afb-b88d-665d30f9acc6">
         <text>
-          <locale_1033>Map origin</locale_1033>
+          <locale_1033>Location</locale_1033>
         </text>
         <left_macro_id>38962386-ac39-539e-8717-bbac66103a53</left_macro_id>
         <right_macro_id>2dbd5d1d-ca40-5f92-86eb-a1efbbd4be14</right_macro_id>
@@ -100,10 +100,10 @@
         <locale_1033>geoBIM.app Cesium ion</locale_1033>
       </text>
       <tooltip>
-        <locale_1033>Upload to Cesium ion: selected objects, or all visible ones (needs a Location)</locale_1033>
+        <locale_1033>Upload to Cesium ion: selected objects, or all visible ones (needs the model's position, see Location)</locale_1033>
       </tooltip>
       <help_text>
-        <locale_1033>Upload to Cesium ion: selected objects, or all visible ones (needs a Location)</locale_1033>
+        <locale_1033>Upload to Cesium ion: selected objects, or all visible ones (needs the model's position, see Location)</locale_1033>
       </help_text>
       <button_text>
         <locale_1033>Cesium ion</locale_1033>
@@ -169,31 +169,13 @@
     </macro_item>
     <macro_item guid="38962386-ac39-539e-8717-bbac66103a53" bitmap_id="f8f395c0-0db2-5529-9720-0a2a08295598">
       <text>
-        <locale_1033>geoBIM.app Map origin</locale_1033>
-      </text>
-      <tooltip>
-        <locale_1033>Map origin: map coordinates E, N, H and rotation of the model origin (models in local coordinates)</locale_1033>
-      </tooltip>
-      <help_text>
-        <locale_1033>Map origin: map coordinates E, N, H and rotation of the model origin (models in local coordinates)</locale_1033>
-      </help_text>
-      <button_text>
-        <locale_1033>Map origin</locale_1033>
-      </button_text>
-      <menu_text>
-        <locale_1033>Map origin</locale_1033>
-      </menu_text>
-      <script>! _GeoBIMMapOrigin</script>
-    </macro_item>
-    <macro_item guid="2dbd5d1d-ca40-5f92-86eb-a1efbbd4be14" bitmap_id="f8f395c0-0db2-5529-9720-0a2a08295598">
-      <text>
         <locale_1033>geoBIM.app Location</locale_1033>
       </text>
       <tooltip>
-        <locale_1033>Rhino's Location (EarthAnchorPoint): latitude, longitude and model north, used for GLB and Cesium ion</locale_1033>
+        <locale_1033>Location: where the model lies — a point of the model and its map coordinates, latitude/longitude, address or a click on the map; sets the map origin and Rhino's Location together</locale_1033>
       </tooltip>
       <help_text>
-        <locale_1033>Rhino's Location (EarthAnchorPoint): latitude, longitude and model north, used for GLB and Cesium ion</locale_1033>
+        <locale_1033>Location: where the model lies — a point of the model and its map coordinates, latitude/longitude, address or a click on the map; sets the map origin and Rhino's Location together</locale_1033>
       </help_text>
       <button_text>
         <locale_1033>Location</locale_1033>
@@ -201,7 +183,25 @@
       <menu_text>
         <locale_1033>Location</locale_1033>
       </menu_text>
-      <script>! _EarthAnchorPoint</script>
+      <script>! _GeoBIMLocation</script>
+    </macro_item>
+    <macro_item guid="2dbd5d1d-ca40-5f92-86eb-a1efbbd4be14" bitmap_id="f8f395c0-0db2-5529-9720-0a2a08295598">
+      <text>
+        <locale_1033>geoBIM.app Show on map</locale_1033>
+      </text>
+      <tooltip>
+        <locale_1033>Show the model's position and outline on the map</locale_1033>
+      </tooltip>
+      <help_text>
+        <locale_1033>Show the model's position and outline on the map</locale_1033>
+      </help_text>
+      <button_text>
+        <locale_1033>Show on map</locale_1033>
+      </button_text>
+      <menu_text>
+        <locale_1033>Show on map</locale_1033>
+      </menu_text>
+      <script>! _-GeoBIMLocation _Show</script>
     </macro_item>
     <macro_item guid="b3d1dfc0-2f8a-5b31-af87-1ecdbd0ed12a" bitmap_id="9468d22f-ce44-5dc6-b253-093f7504519c">
       <text>

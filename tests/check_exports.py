@@ -10,10 +10,16 @@
 #              which the map origin must win over)
 #   ion        the anchor model as GeoBIMUploadIon writes it (east/north/up, model north
 #              turned onto +Y; written with Upload=No, nothing is sent)
+#   location   local model placed by GeoBIMLocation from latitude/longitude (Pfaefers);
+#              with location.json (what Rhino stored and printed), location_ion.ifc
+#   lv95_ion   the lv95 model (map coordinates, no Location) as Cesium ion IFC
 # lv95 and origin must give the same absolute coordinates; origin_rot must be
 # origin's local geometry turned 30° about the map origin; ion must be anchor's
-# geometry turned 30° onto true north. Exit code 1 on failure.
+# geometry turned 30° onto true north. The GeoBIMLocation cases are checked against
+# pyproj: map origin, Rhino's Location and true north (meridian convergence), the GLB
+# placement and the ion IFCs (east/north/up around a base point). Exit code 1 on failure.
 
+import json
 import math
 import os
 import sys
@@ -22,9 +28,10 @@ import ifcopenshell
 import ifcopenshell.util.placement
 import ifcopenshell.validate
 import numpy as np
+from pyproj import CRS, Proj, Transformer
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
-CASES = ["utm", "anchor", "ion", "local", "lv95", "origin", "origin_rot"]
+CASES = ["utm", "anchor", "ion", "local", "lv95", "origin", "origin_rot", "location", "location_ion", "lv95_ion"]
 TOL = 2e-5   # the writer rounds vertices to 5 decimals
 
 failures = []
@@ -167,6 +174,108 @@ if "anchor" in files and "ion" in files:
         exp = np.column_stack([c * pa[:, 0] - s * pa[:, 1], s * pa[:, 0] + c * pa[:, 1], pa[:, 2]])
         worst = max(worst, np.abs(np.sort(exp, axis=0) - np.sort(pb, axis=0)).max())
     check(same and worst < TOL, f"ion = anchor model turned onto true north (max difference {worst:.2e} m)")
+
+# --- GeoBIMLocation and placement from the map position (pyproj as reference) ---
+TO_LV95 = Transformer.from_crs(4326, 2056, always_xy=True)
+TO_WGS = Transformer.from_crs(2056, 4326, always_xy=True)
+LV95 = Proj(CRS.from_epsg(2056))
+
+
+def convergence(lon, lat):
+    """true north, degrees counter-clockwise from grid north"""
+    return LV95.get_factors(lon, lat).meridian_convergence
+
+
+def rot_z(p, deg):
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return np.column_stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1], p[:, 2]])
+
+
+def compare(A, B, fn, tol):
+    """max difference between fn(A) and B per element (sorted vertices; extents when meshed differently)"""
+    worst, same, remeshed = 0.0, len(A) == len(B), []
+    for (na, _, pa), (nb, _, pb) in zip(sorted(A, key=lambda t: t[0]), sorted(B, key=lambda t: t[0])):
+        if na != nb:
+            same = False
+            continue
+        ea = fn(pa)
+        if pa.shape == pb.shape:
+            d = np.abs(np.sort(ea, axis=0) - np.sort(pb, axis=0)).max()
+        else:
+            remeshed.append(na)
+            d = max(np.abs(ea.min(axis=0) - pb.min(axis=0)).max(), np.abs(ea.max(axis=0) - pb.max(axis=0)).max())
+        worst = max(worst, d)
+    return same and worst < tol, worst, remeshed
+
+
+jpath = os.path.join(OUT, "location.json")
+LOC = json.load(open(jpath, encoding="utf-8")) if os.path.exists(jpath) else None
+print("location.json")
+check(LOC is not None, "location.json exists")
+if LOC and "location" in LOC:
+    L = LOC["location"]
+    lat_in, lon_in = 46.9869521994, 9.4763209037
+    e_ref, n_ref = TO_LV95.transform(lon_in, lat_in)
+    try:
+        E0, N0, H0, ROT = (float(v) for v in L["mapOrigin"].split(","))
+    except Exception:
+        E0 = N0 = H0 = ROT = float("nan")
+    check(abs(E0 - e_ref) < 0.002 and abs(N0 - n_ref) < 0.002 and H0 == 0 and ROT == 0,
+          f"location: map origin {L['mapOrigin']} = pyproj LV95 of the latitude/longitude ({e_ref:.4f}, {n_ref:.4f})")
+    check(L["epsg"] == "2056", "location: EPSG 2056 stored for the IFC export")
+    lon0, lat0 = TO_WGS.transform(E0, N0)
+    d = math.hypot((L["lat"] - lat0) * 111320, (L["lon"] - lon0) * 111320 * math.cos(math.radians(lat0)))
+    check(d < 0.002 and L["elevation"] == 0 and L["base"] == [0, 0, 0] and L["zero"] == "MeanSeaLevel",
+          f"location: Rhino's Location at the map origin ({d * 1000:.2f} mm from pyproj), base point 0,0,0, mean sea level")
+    g0 = math.radians(convergence(lon0, lat0))
+    nx, ny, _ = L["north"]
+    ex, ey, _ = L["east"]
+    check(abs(nx + math.sin(g0)) < 1e-6 and abs(ny - math.cos(g0)) < 1e-6 and abs(ex - math.cos(g0)) < 1e-6 and abs(ey - math.sin(g0)) < 1e-6,
+          f"location: model north turned by the meridian convergence {math.degrees(g0):.4f}° (north {nx:.6f}, {ny:.6f})")
+    if "location" in files:
+        g = georef(files["location"])
+        check(g is not None and g["crs"] == "EPSG:2056" and abs(g["e"] - E0) < 1e-6 and abs(g["n"] - N0) < 1e-6 and g["h"] == 0,
+              "location: IFC MapConversion = the map origin GeoBIMLocation set")
+
+    # GLB placement and the ion IFC share the base point: the model centre rounded to metres
+    pl = (LOC.get("location_glb") or {}).get("placement")
+    io = (LOC.get("location_ion") or {}).get("origin")
+    check(pl is not None and io is not None, "location: GLB placement and ion origin printed")
+    if pl and io and "location" in files and "location_ion" in files:
+        A = local_vertices(files["location"])
+        allp = np.vstack([t[2] for t in A])
+        centre = (allp.min(axis=0) + allp.max(axis=0)) / 2
+        eb, nb = TO_LV95.transform(io[0], io[1])
+        bx, by = eb - E0, nb - N0
+        check(abs(bx - round(bx)) < 0.02 and abs(by - round(by)) < 0.02 and abs(bx - centre[0]) < 1.5 and abs(by - centre[1]) < 1.5,
+              f"location_ion: origin at the model centre rounded to metres (local {bx:.3f}, {by:.3f}; centre {centre[0]:.2f}, {centre[1]:.2f})")
+        check(abs(io[2] - 48.7) < 1e-3, f"location_ion: height = H0 + GeoidN = 48.7 m ({io[2]})")
+        check(abs(pl[0] - io[0]) < 2e-6 and abs(pl[1] - io[1]) < 2e-6 and abs(pl[2]) < 0.01,
+              "location_glb: GLB placed at the same base point, 0 m above sea level")
+        gb = convergence(io[0], io[1])
+        check(abs(pl[3] - gb) < 0.06, f"location_glb: heading {pl[3]}° = convergence {gb:.3f}° (model +Y is map north)")
+        b = np.array([round(bx), round(by), 0.0])
+        ok, worst, rem = compare(A, local_vertices(files["location_ion"]), lambda p: rot_z(p - b, -gb), 3 * TOL)
+        check(ok, f"location_ion: geometry in east/north/up around the base point, turned by -{gb:.3f}° (max difference {worst:.2e} m)"
+              + (f"; extents for {', '.join(rem)}" if rem else ""))
+
+if LOC and "lv95_ion" in files and "lv95" in files:
+    io = (LOC.get("lv95_ion") or {}).get("origin")
+    check(io is not None, "lv95_ion: origin printed (map coordinates placed without a Location)")
+    if io:
+        ga = georef(files["lv95"])
+        A = [(n, c, to_map(p, ga)) for n, c, p in local_vertices(files["lv95"])]
+        allp = np.vstack([t[2] for t in A])
+        centre = (allp.min(axis=0) + allp.max(axis=0)) / 2
+        eb, nb = TO_LV95.transform(io[0], io[1])
+        check(abs(eb - round(eb)) < 0.02 and abs(nb - round(nb)) < 0.02 and abs(eb - centre[0]) < 1.5 and abs(nb - centre[1]) < 1.5,
+              f"lv95_ion: origin = model centre rounded to metres in LV95 ({eb:.3f}, {nb:.3f})")
+        check(abs(io[2] - 48.7) < 1e-3, f"lv95_ion: height 0 + GeoidN = 48.7 m ({io[2]})")
+        gb = convergence(io[0], io[1])
+        b = np.array([round(eb), round(nb), 0.0])
+        ok, worst, rem = compare(A, local_vertices(files["lv95_ion"]), lambda p: rot_z(p - b, -gb), 3 * TOL)
+        check(ok, f"lv95_ion: LV95 geometry in east/north/up around the base point, turned by -{gb:.4f}° (max difference {worst:.2e} m)"
+              + (f"; extents for {', '.join(rem)}" if rem else ""))
 
 print()
 print("all checks passed" if not failures else f"{len(failures)} check(s) failed")

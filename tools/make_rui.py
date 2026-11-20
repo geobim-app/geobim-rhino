@@ -3,7 +3,7 @@
 # One toolbar "geoBIM.app" (in its own toolbar group) with five buttons, each
 # with a left and a right click as Rhino's own toolbars have them (Rhino shows
 # both in the tooltip): geoBIM.app (upload / open), Cesium ion (upload / token),
-# Export (IFC / GLB), Georeferencing (map origin / Location), Settings
+# Export (IFC / GLB), Location (set it / show it on the map), Settings
 # (settings / connection test).
 # Icons: drawn by tools/make_icons.py as SVG for light and dark mode
 # (tools/icons/<icon>.svg and <icon>_dark.svg), embedded in <icons> as Rhino 8
@@ -35,17 +35,17 @@ BUTTONS = [
     ("upload", "geoBIM.app", "Upload to geoBIM.app: selected objects, or all visible ones",
      "! _GeoBIMUpload", "geobim",
      ("Open in geoBIM.app", "Open this document's model in geoBIM.app", "! _GeoBIMOpen")),
-    ("ion", "Cesium ion", "Upload to Cesium ion: selected objects, or all visible ones (needs a Location)",
+    ("ion", "Cesium ion", "Upload to Cesium ion: selected objects, or all visible ones (needs the model's position, see Location)",
      "! _GeoBIMUploadIon", "ion",
      ("Cesium ion token", "Set the Cesium ion access token (scopes assets:list, assets:read, assets:write)",
       "! _GeoBIMSettings _IonToken")),
     ("export", "Export IFC", "Export the selection as IFC 4",
      "! _GeoBIMExportIfc", "export",
      ("Export GLB", "Export the selection as GLB (binary glTF with PBR materials)", "! _GeoBIMExportGlb")),
-    ("origin", "Map origin", "Map origin: map coordinates E, N, H and rotation of the model origin (models in local coordinates)",
-     "! _GeoBIMMapOrigin", "origin",
-     ("Location", "Rhino's Location (EarthAnchorPoint): latitude, longitude and model north, used for GLB and Cesium ion",
-      "! _EarthAnchorPoint")),
+    ("origin", "Location", "Location: where the model lies — a point of the model and its map coordinates, latitude/longitude, "
+     "address or a click on the map; sets the map origin and Rhino's Location together",
+     "! _GeoBIMLocation", "origin",
+     ("Show on map", "Show the model's position and outline on the map", "! _-GeoBIMLocation _Show")),
     ("settings", "Settings", "Settings: geoBIM.app server and plugin token, EPSG, Cesium ion token",
      "! _GeoBIMSettings", "settings",
      ("Test connections", "Test the connection to geoBIM.app and to Cesium ion", "! _-GeoBIMSettings _Test _IonTest _Enter")),

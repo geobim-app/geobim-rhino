@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Checks src/GeoBimRhino/GeoProj.cs (LV95 and UTM ↔ WGS84, convergence, position parsing)
+       against pyproj 3.7.2 / PROJ 9.5.1. Run: dotnet run, with the project folder tests/geo_check -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\GeoBimRhino\GeoProj.cs" Link="GeoProj.cs" />
+    <Compile Include="..\..\src\GeoBimRhino\CrsDetect.cs" Link="CrsDetect.cs" />
+  </ItemGroup>
+</Project>
