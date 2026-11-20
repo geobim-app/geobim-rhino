@@ -55,7 +55,7 @@ namespace GeoBimRhino
             if (ShowToolbar()) Settings.SetBool("toolbarShown", true);
         }
 
-        /// <summary>Opens GeoBimRhino.rui if needed and shows the geoBIM.app toolbar group</summary>
+        /// <summary>Opens GeoBimRhino.rui if needed and shows the geoBIM.app toolbar; false if the file is missing</summary>
         public static bool ShowToolbar()
         {
             try
@@ -65,14 +65,51 @@ namespace GeoBimRhino
                 var files = Rhino.RhinoApp.ToolbarFiles;
                 var file = files.FindByPath(path) ?? files.Open(path);
                 if (file == null) return false;
+                // Rhino 7 keeps the toolbar group; Rhino 8 turns it into a container (GroupCount 0,
+                // GetGroup gives null) and RhinoCommon has no call to show a container
                 var group = file.GetGroup(ToolbarGroupName);
-                if (group == null) return false;
-                group.Visible = true;
+                if (group != null)
+                {
+                    group.Visible = true;
+                    return true;
+                }
+                if (file.ToolbarCount > 0 && ShowToolbarRhino8(file.Id, file.GetToolbar(0).Id)) return true;
+                // last resort: Rhino 8's command (did not show a hidden container in 8.37)
+                Rhino.RhinoApp.RunScript("_-ShowToolbar \"" + ToolbarGroupName + "\"", false);
                 return true;
             }
             catch (Exception ex)
             {
                 Rhino.RhinoApp.WriteLine("geoBIM.app: toolbar could not be opened — " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Shows a toolbar in Rhino 8: the internal
+        /// Rhino.UI ToolBarFileController.ShowToolBar(doc, fileId, toolbarId) shows the container
+        /// holding the toolbar, or a new floating one. Reflection, because it is not public;
+        /// false if this Rhino does not have it.
+        /// </summary>
+        static bool ShowToolbarRhino8(Guid fileId, Guid toolbarId)
+        {
+            try
+            {
+                Type type = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    if (asm.GetName().Name == "Rhino.UI")
+                    {
+                        type = asm.GetType("Rhino.UI.Internal.TabPanels.ToolBarFileController", false);
+                        if (type != null) break;
+                    }
+                var method = type?.GetMethod("ShowToolBar",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+                    null, new[] { typeof(Rhino.RhinoDoc), typeof(Guid), typeof(Guid) }, null);
+                if (method == null) return false;
+                return method.Invoke(null, new object[] { Rhino.RhinoDoc.ActiveDoc, fileId, toolbarId }) != null;
+            }
+            catch
+            {
                 return false;
             }
         }

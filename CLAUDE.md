@@ -17,8 +17,10 @@ what changed recently.
   Cesium ion IFC of the EarthAnchorPoint case (`ion.ifc`, nothing is sent) and closes Rhino. Then run `python tests/check_exports.py`
   (system Python with ifcopenshell 0.9). It validates the schema and compares absolute coordinates between the
   cases. Exit code 0 means everything passed.
-- Toolbar: `python tools/make_icons.py && python tools/make_rui.py` (buttons, macros and icons are defined in
-  `BUTTONS` in `make_rui.py`; Lucide SVGs in `tools/icons/`). The `.rui` is copied next to the `.rhp` on build.
+- Toolbar: `python tools/make_icons.py && python tools/make_rui.py`. Buttons and their left/right macros are in
+  `BUTTONS` in `make_rui.py`; the icons are drawn in `make_icons.py` (SVG for light and dark mode in
+  `tools/icons/`, PNG strips as fallback). The SVG goes into the `.rui` as real XML inside `<icon><light>`/`<dark>`:
+  Rhino 8 shows text-only buttons for escaped text or CDATA. The `.rui` is copied next to the `.rhp` on build.
 - Uploads: `examples/upload_knot_glb.py` shows how to run `_-GeoBIMUpload` from a script and wait for "ready —"
   in the command history.
 - Report exactly which checks ran and which did not. A build alone is not a test.

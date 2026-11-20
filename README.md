@@ -36,7 +36,7 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 | `GeoBIMMapOrigin` | Map coordinates E,N[,H[,rotation]] of the model origin for models drawn in local coordinates (see *Georeferencing*); `Clear` removes them. Scripted: `-GeoBIMMapOrigin 2755000,1206000,0,0`. |
 | `GeoBIMUploadIon` | Uploads the selection to **Cesium ion** as a new 3D Tiles asset (see below). |
 | `GeoBIMSettings` | Server, token, EPSG, connection test; `IonToken` / `IonTest` for Cesium ion. |
-| `GeoBIMToolbar` | Shows the geoBIM.app toolbar: Upload, Cesium ion (right click: ion token), Open, Export IFC, Map origin, Settings. |
+| `GeoBIMToolbar` | Shows the geoBIM.app toolbar. Left / right click: **geoBIM.app** (upload / open in the browser), **Cesium ion** (upload / ion token), **Export** (IFC / GLB), **Map origin** (map origin / Rhino's Location), **Settings** (settings / test the connections). |
 
 ## GLB instead of IFC
 

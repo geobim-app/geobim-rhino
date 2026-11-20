@@ -41,10 +41,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Checked end-to-end on 2026-11-19: Taminabrücke uploaded to Cesium ion (EU account), tiled with
     the BIM/CAD tiler in about 4 minutes; tileset transform exactly at the Location, bridge centre
     0.13 m / 0.08 m from the LV95 position computed with pyproj.
-- **Toolbar with six buttons** (`tools/make_rui.py`, new `tools/make_icons.py`, `tools/icons/`): Upload,
-  **Cesium ion** (right click: set the ion token), Open, Export IFC, **Map origin**, Settings. Icons are
-  Lucide SVGs (ISC, lucide-static 0.460.0, kept in `tools/icons/`) rendered with PyMuPDF in the brand
-  colour; button GUIDs stay derived from fixed names, so Rhino keeps treating it as the same toolbar.
+- **Toolbar in Rhino 8 style** (`tools/make_icons.py`, `tools/make_rui.py`, `tools/icons/`): five buttons,
+  each with a left and a right click as in Rhino's own toolbars — **geoBIM.app** (upload / open in the
+  browser), **Cesium ion** (upload / ion token), **Export** (IFC / GLB), **Map origin** (map origin /
+  Rhino's Location), **Settings** (settings / test both connections). The icons are drawn by
+  `make_icons.py` like Rhino's: filled shapes with a dark outline — the geoBIM logo, the Earth, an IFC
+  page, a map pin on a construction grid with the red and green axes, a gear — with an orange badge for
+  upload and a green one for export. They are embedded in the `.rui` as SVG for light and dark mode, so
+  they stay sharp at every size; Rhino 8 reads them only as real XML inside `<icon><light>`/`<dark>`
+  (escaped text and CDATA gave text-only buttons, checked in Rhino 8 on 2026-11-20). PNG strips remain
+  as fallback; button GUIDs stay derived from fixed names, so Rhino keeps treating it as the same toolbar.
 - **Package for the Rhino Package Manager** (`tools/make_yak.py`, `tools/yak/`): builds the plugin and
   writes `dist/geobim-<version>-rh8_0-win.yak` (Windows, Rhino 8) with the `.rhp`, `.rui`, icon,
   licence and manifest. It never pushes.
@@ -67,6 +73,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Tokens are entered in a dialog with a hidden field** (interactive `GeoBIMSettings`): Rhino's
   command line echoed pasted tokens into the command history. Scripted `-GeoBIMSettings` still reads
   them from the command line.
+
+### Fixed
+
+- **`GeoBIMToolbar` in Rhino 8** (`GeoBimPlugin.cs`): Rhino 8 turns the toolbar group into a container,
+  so `ToolbarFile.GetGroup` returns nothing (`GroupCount` 0) and the command reported "toolbar file not
+  found" although the file was open. RhinoCommon has no call to show a container, and Rhino 8's
+  `_-ShowToolbar "geoBIM.app"` accepted the name but left a hidden container hidden (8.37). The plugin
+  now calls Rhino 8's own internal `ToolBarFileController.ShowToolBar` (Rhino.UI, by reflection), which shows the container or a new floating one; `_-ShowToolbar` stays as
+  fallback, Rhino 7's group path as before. Checked in Rhino 8.37 on 2026-11-20 with the container
+  hidden.
 
 ## [0.2.0] — 2026-11-13
 

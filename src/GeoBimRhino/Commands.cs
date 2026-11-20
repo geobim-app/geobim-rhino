@@ -873,6 +873,7 @@ namespace GeoBimRhino
 
     // ------------------------------------------------------------------
     [Guid("b3d2a8c4-5e1f-4f6a-9c7d-2e8b1a4f6d30")]
+    [CommandStyle(Style.ScriptRunner)] // may run _-ShowToolbar (fallback in Rhino 8)
     public class GeoBIMToolbarCommand : Command
     {
         public override string EnglishName => "GeoBIMToolbar";

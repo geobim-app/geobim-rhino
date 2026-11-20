@@ -1,10 +1,18 @@
 # geoBIM.app for Rhino — builds src/GeoBimRhino/GeoBimRhino.rui
 #
-# One toolbar "geoBIM.app" (in its own toolbar group) with six buttons:
-# Upload, Cesium ion (right click: ion token), Open in browser, Export IFC,
-# Map origin, Settings. Icons: Lucide (ISC license, SVGs in tools/icons/)
-# rendered in the brand colour #2ECFB0 by tools/make_icons.py as PNG strips in
-# Resources/ (toolbar-16/24/32.png, one icon per 16/24/32 px, same order as BUTTONS).
+# One toolbar "geoBIM.app" (in its own toolbar group) with five buttons, each
+# with a left and a right click as Rhino's own toolbars have them (Rhino shows
+# both in the tooltip): geoBIM.app (upload / open), Cesium ion (upload / token),
+# Export (IFC / GLB), Georeferencing (map origin / Location), Settings
+# (settings / connection test).
+# Icons: drawn by tools/make_icons.py as SVG for light and dark mode
+# (tools/icons/<icon>.svg and <icon>_dark.svg), embedded in <icons> as Rhino 8
+# reads them: <icon guid><light><svg …/></light><dark><svg …/></dark></icon>,
+# referenced by the macro's bitmap_id, so they stay sharp at every size. The SVG
+# must be real child elements: Rhino 8.x showed text-only buttons for escaped
+# text and for CDATA (tested 2026-11-20). The PNG strips in Resources/
+# (toolbar-16/24/32.png, order of BUTTONS) under the same ids are the bitmap
+# fallback.
 # Layout as in Rhino 8's own default.rui (format 5): the bitmap_item entries
 # sit inside every bitmap size, active_tool_bar_group is the id of the toolbar
 # shown first. GUIDs are derived from fixed names, so a rebuilt file keeps
@@ -23,18 +31,27 @@ NS = uuid.UUID("2629d057-640c-483e-996d-942ddc6eb616")   # plugin guid as namesp
 NL = "\n"
 
 BUTTONS = [
-    # (key, label, tooltip, macro, Lucide icon, optional right click: (label, tooltip, macro))
-    ("upload", "Upload", "Upload to geoBIM.app: selected objects, or all visible ones", "! _GeoBIMUpload", "cloud-upload", None),
+    # (key, label, tooltip, macro, icon in tools/icons/, right click: (label, tooltip, macro) or None)
+    ("upload", "geoBIM.app", "Upload to geoBIM.app: selected objects, or all visible ones",
+     "! _GeoBIMUpload", "geobim",
+     ("Open in geoBIM.app", "Open this document's model in geoBIM.app", "! _GeoBIMOpen")),
     ("ion", "Cesium ion", "Upload to Cesium ion: selected objects, or all visible ones (needs a Location)",
-     "! _GeoBIMUploadIon", "earth",
+     "! _GeoBIMUploadIon", "ion",
      ("Cesium ion token", "Set the Cesium ion access token (scopes assets:list, assets:read, assets:write)",
       "! _GeoBIMSettings _IonToken")),
-    ("open", "Open", "Open this model in geoBIM.app", "! _GeoBIMOpen", "globe", None),
-    ("export", "Export IFC", "Export the selection as IFC 4 for geoBIM.app", "! _GeoBIMExportIfc", "file-down", None),
-    ("origin", "Map origin", "Map coordinates of the model origin for local coordinates (E, N, H, rotation)",
-     "! _GeoBIMMapOrigin", "locate-fixed", None),
-    ("settings", "Settings", "Settings: geoBIM.app server and plugin token, EPSG, Cesium ion token", "! _GeoBIMSettings", "settings", None),
+    ("export", "Export IFC", "Export the selection as IFC 4",
+     "! _GeoBIMExportIfc", "export",
+     ("Export GLB", "Export the selection as GLB (binary glTF with PBR materials)", "! _GeoBIMExportGlb")),
+    ("origin", "Map origin", "Map origin: map coordinates E, N, H and rotation of the model origin (models in local coordinates)",
+     "! _GeoBIMMapOrigin", "origin",
+     ("Location", "Rhino's Location (EarthAnchorPoint): latitude, longitude and model north, used for GLB and Cesium ion",
+      "! _EarthAnchorPoint")),
+    ("settings", "Settings", "Settings: geoBIM.app server and plugin token, EPSG, Cesium ion token",
+     "! _GeoBIMSettings", "settings",
+     ("Test connections", "Test the connection to geoBIM.app and to Cesium ion", "! _-GeoBIMSettings _Test _IonTest _Enter")),
 ]
+
+ICONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 
 
 def macros():
@@ -52,6 +69,11 @@ def gid(name):
 def b64(name):
     with open(os.path.join(PROJ, "Resources", name), "rb") as f:
         return base64.b64encode(f.read()).decode("ascii")
+
+
+def icon_svg(icon, dark):
+    with open(os.path.join(ICONS, icon + ("_dark" if dark else "") + ".svg"), encoding="utf-8") as f:
+        return f.read().strip()
 
 
 def text(tag, value, indent):
@@ -81,7 +103,7 @@ def build():
     o.append("      </tool_bar_group_item>" + NL)
     o.append('      <dock_bar_info dpi_scale="100" dock_bar="False" docking="True" horz="True" visible="True" '
              'floating="True" mru_float_style="8192" bar_id="59500" mru_width="1" point_pos="400,200" '
-             'float_point="400,200" dock_location_u="59419" dock_location="top" float_size="260,44" />' + NL)
+             'float_point="400,200" dock_location_u="59419" dock_location="top" float_size="270,96" />' + NL)
     o.append("    </tool_bar_group>" + NL)
     o.append("  </tool_bar_groups>" + NL)
     o.append("  <tool_bars>" + NL)
@@ -115,6 +137,13 @@ def build():
         o.append("      <bitmap>%s</bitmap>" % b64("toolbar-%d.png" % size) + NL)
         o.append("    </%s>" % tag + NL)
     o.append("  </bitmaps>" + NL)
+    o.append("  <icons>" + NL)
+    for key, label, tip, macro, icon, right in BUTTONS:
+        o.append('    <icon guid="%s">' % gid("bmp-" + key) + NL)
+        o.append("      <light>%s</light>" % icon_svg(icon, False) + NL)
+        o.append("      <dark>%s</dark>" % icon_svg(icon, True) + NL)
+        o.append("    </icon>" + NL)
+    o.append("  </icons>" + NL)
     o.append("  <scripts />" + NL)
     o.append("</RhinoUI>" + NL)
     path = os.path.join(PROJ, "GeoBimRhino.rui")
