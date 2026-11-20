@@ -15,8 +15,7 @@ Rhino 8 plugin (Windows) that puts Rhino models in their place on the map:
 Rhino objects ──► IFC 4 / GLB (plugin) ──► geoBIM.app (3D Tiles) or Cesium ion ──► viewer, georeferenced
 ```
 
-> **Beta.** Version 0.3.0 is a public beta. Please report problems and wishes as
-> [GitHub issues](https://github.com/geobim-app/geobim-rhino/issues) or to info@geobim.app.
+> **Beta.** Version 0.3.0 is a public beta. Please report problems and wishes to info@geobim.app.
 > **Uploads to geoBIM.app need a geoBIM.app account** with a plugin token; ask for one at info@geobim.app.
 > Export, georeferencing and Cesium ion (your own ion account) work without it.
 
