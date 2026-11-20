@@ -1,0 +1,23 @@
+---
+# Rhino Package Manager (Yak) manifest; tools/make_yak.py fills in the version from the .csproj
+name: geobim
+version: 0.0.0
+authors:
+- Christof Lorenz
+description: >
+  Uploads Rhino models to geoBIM.app and Cesium ion, georeferenced: the selected objects become
+  an IFC 4 (or GLB) with colours, layers and user text as properties, are converted to 3D Tiles
+  and open in the browser in place. Georeferencing from map coordinates (UTM, LV95, Gauss-Krüger,
+  Austrian systems), a map origin stored in the document, or the EarthAnchorPoint.
+url: https://geobim.app
+icon: icon.png
+keywords:
+- geobim
+- ifc
+- bim
+- gis
+- georeferencing
+- 3d-tiles
+- cesium
+- lv95
+- upload

@@ -7,7 +7,7 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <AssemblyName>GeoBimRhino</AssemblyName>
     <RootNamespace>GeoBimRhino</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Company>geoBIM.app</Company>
     <Product>geoBIM.app for Rhino</Product>
     <Description>Uploads Rhino models to geoBIM.app (IFC 4 → geobim-tiler → 3D Tiles)</Description>
@@ -30,6 +30,12 @@
     <!-- Toolbar next to the .rhp: Rhino opens a .rui with the plugin's name on its first load
          (built by tools/make_rui.py from Resources/toolbar-*.png) -->
     <None Include="GeoBimRhino.rui" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Geoid grids for Cesium ion heights (tools/make_geoid.py): EGM2008 (NGA, public domain),
+         GCG2016 (BKG, CC BY 4.0, "Derived from work by BKG") -->
+    <EmbeddedResource Include="Resources\geoid\*.bin" LogicalName="GeoBimRhino.geoid.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

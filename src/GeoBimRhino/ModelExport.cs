@@ -24,18 +24,30 @@ namespace GeoBimRhino
         public string GeoRefInfo = "";
         public string Epsg;          // EPSG code written into IfcMapConversion, else null
         public bool Cancelled;       // the user cancelled the CRS question
+        // Cesium ion export: WGS84 position of the IFC origin (the base point from
+        // GeoLocation.For) and its height above sea level (no geoid yet)
+        public double IonLon, IonLat, IonElevation;
+        // GLB / Cesium ion: why the map position could not be used (then Rhino's Location places it), else null
+        public string PlacementNote;
+        // Cesium ion: coordinate system of the position (null for Rhino's Location), for the geoid choice
+        public int? IonEpsg;
     }
+
+    public enum ExportTarget { Ifc, Glb, Ion }
 
     /// <summary>
     /// Rhino objects → IfcModelData. One IFC element per Rhino object (block
     /// instances: one per component, with the instance transform), geometry as
     /// render meshes in metres, relative to an origin chosen by the
     /// georeferencing so float vertices keep millimetres:
-    ///  1. map coordinates (|x| or |y| &gt; 100 km): IfcMapConversion, EPSG from
+    ///  1. map origin stored in the document (local coordinates, see MapOrigin):
+    ///     IfcMapConversion with that origin, geometry unchanged;
+    ///  2. map coordinates (|x| or |y| &gt; 100 km): IfcMapConversion, EPSG from
     ///     the caller (setting, document choice, CrsDetect, or asked);
-    ///  2. EarthAnchorPoint set: IfcSite RefLatitude/RefLongitude/RefElevation,
+    ///  3. EarthAnchorPoint set: IfcSite RefLatitude/RefLongitude/RefElevation,
     ///     model base point as origin, model north as TrueNorth;
-    ///  3. otherwise none: geoBIM.app drops the model at the centre of the view.
+    ///  4. otherwise none: geoBIM.app drops the model at the centre of the view.
+    /// GLB and Cesium ion are placed by latitude/longitude instead (see GeoLocation.For).
     /// </summary>
     public static class ModelExport
     {
@@ -51,7 +63,14 @@ namespace GeoBimRhino
         }
 
         /// <param name="resolveEpsg">EPSG for map coordinates (easting, northing of the model centre in metres); null cancels</param>
-        public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, Func<double, double, int?> resolveEpsg)
+        /// <param name="mapOrigin">map origin of local coordinates (the document's, see MapOrigin), or null to ignore it</param>
+        /// <param name="target">IFC: georeferencing as listed above. GLB: placed by latitude/longitude from
+        /// GeoLocation.For (map origin or map coordinates when they convert, else Rhino's Location).
+        /// Cesium ion: geometry in east/north/up metres around that base point (true north turned to
+        /// +Y, as EarthLink exports), no georeferencing in the IFC itself; the position travels
+        /// separately (IonLon/IonLat/IonElevation).</param>
+        public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, Func<double, double, int?> resolveEpsg,
+                                         MapOrigin mapOrigin = null, ExportTarget target = ExportTarget.Ifc)
         {
             var res = new ExportResult();
             var model = new IfcModelData
@@ -77,7 +96,65 @@ namespace GeoBimRhino
             // ---- Georeferencing → origin (model units) ----
             Point3d origin;
             var anchor = doc.EarthAnchorPoint;
-            if (CrsDetect.LooksLikeMap(cx, cy))
+            bool inMapCoords = CrsDetect.LooksLikeMap(cx, cy);
+            var rotate = Transform.Identity;
+            if (target != ExportTarget.Ifc)
+            {
+                var a = GeoLocation.For(doc, mapOrigin, cx, cy, scale, out string note);
+                res.PlacementNote = note;
+                if (target == ExportTarget.Ion)
+                {
+                    if (a == null)
+                        throw new InvalidOperationException("Cesium ion needs the model's position — set it with GeoBIMLocation");
+                    origin = a.BasePoint;
+                    // turn true north onto +Y (east/north/up), so ion needs no heading
+                    double north = Math.Atan2(-a.North.X, a.North.Y);
+                    rotate = Transform.Rotation(-north, Vector3d.ZAxis, Point3d.Origin);
+                    res.IonLat = a.Lat;
+                    res.IonLon = a.Lon;
+                    res.IonElevation = a.Elevation;
+                    res.IonEpsg = a.Epsg;
+                    res.GeoRefInfo = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "east/north/up around {0:0.000000}, {1:0.000000}, {2:0.##} m from the {3} (true north {4:0.###}° clockwise from +Y)",
+                        res.IonLat, res.IonLon, res.IonElevation, a.Source, -north * 180.0 / Math.PI);
+                }
+                else if (a != null)
+                {
+                    origin = a.BasePoint;
+                    model.GeoRef = GeoRefKind.SiteLatLon;
+                    model.Latitude = a.Lat;
+                    model.Longitude = a.Lon;
+                    model.Elevation = a.Elevation;
+                    model.TrueNorthX = a.North.X;
+                    model.TrueNorthY = a.North.Y;
+                    res.GeoRefInfo = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "{0:0.000000}, {1:0.000000}, {2:0.##} m from the {3}", model.Latitude, model.Longitude, model.Elevation, a.Source);
+                }
+                else
+                {
+                    origin = new Point3d(c.X, c.Y, bbox.Min.Z);
+                    res.GeoRefInfo = "no position — place the model in geoBIM.app and save its position, or set it with GeoBIMLocation";
+                }
+            }
+            else if (mapOrigin != null && !inMapCoords)
+            {
+                // Local coordinates + stored map origin: the geometry stays as it is
+                mapOrigin.ToMap(cx, cy, out double me, out double mn);
+                int? chosen = resolveEpsg(me, mn);
+                if (chosen == null) { res.Cancelled = true; return res; }
+                int epsg = chosen.Value;
+                origin = Point3d.Origin;
+                model.GeoRef = GeoRefKind.MapConversion;
+                model.CrsName = "EPSG:" + epsg;
+                model.Eastings = mapOrigin.E;
+                model.Northings = mapOrigin.N;
+                model.OrthogonalHeight = mapOrigin.H;
+                model.XAxisAbscissa = mapOrigin.XAxisAbscissa;
+                model.XAxisOrdinate = mapOrigin.XAxisOrdinate;
+                res.Epsg = epsg.ToString();
+                res.GeoRefInfo = $"map origin, EPSG:{epsg} ({mapOrigin.Describe()})";
+            }
+            else if (inMapCoords)
             {
                 int? chosen = resolveEpsg(cx, cy);
                 if (chosen == null) { res.Cancelled = true; return res; }
@@ -90,7 +167,8 @@ namespace GeoBimRhino
                 model.Northings = oy;
                 model.OrthogonalHeight = 0;
                 res.Epsg = epsg.ToString();
-                res.GeoRefInfo = $"map coordinates, EPSG:{epsg} (origin E {ox:0} N {oy:0})";
+                res.GeoRefInfo = $"map coordinates, EPSG:{epsg} (origin E {ox:0} N {oy:0})"
+                                 + (mapOrigin != null ? " — the document's map origin is ignored, the geometry already lies in map coordinates" : "");
             }
             else if (anchor != null && anchor.EarthLocationIsSet())
             {
@@ -110,7 +188,7 @@ namespace GeoBimRhino
                 res.GeoRefInfo = "no georeferencing — place the model in geoBIM.app and save its position";
             }
 
-            var toIfc = Transform.Scale(Point3d.Origin, scale) * Transform.Translation(-(Vector3d)origin);
+            var toIfc = Transform.Scale(Point3d.Origin, scale) * rotate * Transform.Translation(-(Vector3d)origin);
             var mp = doc.GetCurrentMeshingParameters() ?? MeshingParameters.QualityRenderMesh;
 
             foreach (var it in items)
@@ -210,6 +288,30 @@ namespace GeoBimRhino
             e.R = color.R / 255.0; e.G = color.G / 255.0; e.B = color.B / 255.0;
             var mat = obj.GetMaterial(true);
             if (mat != null) e.Transparency = Math.Max(0, Math.Min(1, mat.Transparency));
+            // PBR for GLB: GetMaterial() is only a simplified copy of the render
+            // material, so ask the render material for its physically based form
+            PhysicallyBasedMaterial pb = mat != null && mat.IsPhysicallyBased ? mat.PhysicallyBased : null;
+            if (pb == null)
+            {
+                var rmat = obj.GetRenderMaterial(true);
+                if (rmat != null)
+                {
+                    try { pb = rmat.ConvertToPhysicallyBased(Rhino.Render.RenderTexture.TextureGeneration.Skip); }
+                    catch (Exception) { pb = null; }
+                }
+            }
+            if (pb != null)
+            {
+                var bc = pb.BaseColor;
+                e.Pbr = new PbrData
+                {
+                    R = Clamp01(bc.R), G = Clamp01(bc.G), B = Clamp01(bc.B),
+                    Alpha = Clamp01(pb.Opacity),
+                    Metallic = Clamp01(pb.Metallic),
+                    Roughness = Clamp01(pb.Roughness),
+                    Name = mat?.Name ?? ""
+                };
+            }
 
             string type = TypeName(obj.Geometry);
             string objName = attrs.Name;
@@ -250,8 +352,22 @@ namespace GeoBimRhino
                 e.Mesh.Triangles.Add(f.B);
                 e.Mesh.Triangles.Add(f.C);
             }
+            // Vertex normals (render meshes keep creases as split vertices)
+            if (mesh.Normals.Count != v.Count) mesh.Normals.ComputeNormals();
+            if (mesh.Normals.Count == v.Count)
+            {
+                for (int i = 0; i < v.Count; i++)
+                {
+                    var n = mesh.Normals[i];
+                    e.Mesh.Normals.Add(n.X);
+                    e.Mesh.Normals.Add(n.Y);
+                    e.Mesh.Normals.Add(n.Z);
+                }
+            }
             return e;
         }
+
+        static double Clamp01(double x) => double.IsNaN(x) ? 0 : Math.Max(0, Math.Min(1, x));
 
         static void AddUserText(IfcElementData e, NameValueCollection strings)
         {
