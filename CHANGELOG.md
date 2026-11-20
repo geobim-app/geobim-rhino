@@ -21,10 +21,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and give its position as map coordinates, latitude/longitude (as Google Maps or map.geo.admin.ch copy them, also
   degrees/minutes/seconds), a place or address (swisstopo search in Switzerland, OpenStreetMap's Nominatim
   elsewhere, asked in parallel; hits show their source; Nominatim used as its usage policy asks: the plugin's
-  User-Agent, one request per second, no search while typing, cached, credited) or a click on a map window
+  User-Agent, one request per second, no search while typing, cached, credited, and switchable without an update
+  through `https://viewer.geobim.app/plugin/rhino.json`) or a click on a map window
   (swisstopo map and aerial images, BKG TopPlusOpen, taken automatically outside Switzerland and at the start when
   the model has no position yet; the model's outline follows the marker; its search box runs through the
-  plugin); then the height
+  plugin; after a click it reads the terrain height from Mapterhorn); then the height
   (`Terrain`: swisstopo's terrain height after a search or map click) and map north (`TwoPoints`). It stores the
   map origin and the coordinate system and sets Rhino's Location to the same place, with true north from the
   meridian convergence. `Show` displays the model's outline on the map. Replaces `GeoBIMMapOrigin` (never
@@ -95,6 +96,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **One plugin token per server** (`GeoBimPlugin.cs`, `Commands.cs`): a token works only on the site that created
+  it, so Live, Beta and a custom server each keep their own (`token|<server>`); switching needs no new input, and
+  a server without a token says so. The single token of earlier versions becomes the token of the server set when
+  0.3.0 first runs.
+- **Height in `GeoBIMLocation`** (moving a Swiss test model to Bavaria kept 668 m, about 266 m above the ground
+  there, and picking the spot again on the map and pressing Enter kept it again): after a map click or a search the
+  default is the terrain height (swisstopo in Switzerland, Mapterhorn after a map click elsewhere), with a note
+  when the point had another height; models whose z values are heights above sea level keep them. Without a
+  terrain height the current height is proposed only while the point stays within 1 km, else there is no default,
+  and a script without a height stops and changes nothing.
+- **Empty token dialog**: OK without a token changes nothing and is no error any more (plugin and ion token).
+- **Units check before uploads** (`Commands.cs`, `ModelExport.cs`): a selection smaller than 25 cm or larger than
+  50 km is almost always drawn in other units than the document has (a 5 m test cube drawn as 5 in a millimetre
+  document reached geoBIM.app as 5 mm and could not be seen). `GeoBIMUpload` and `GeoBIMUploadIon` then warn
+  and ask whether to upload anyway (default No); exports and scripts warn only.
 - **Tokens can no longer be mixed up**: a Cesium ion token pasted into `GeoBIMSettings → Token` is
   recognised (JWT, `eyJ…`) and stored as the ion token; a `gbp_…` token pasted into `IonToken` is
   refused with a hint. Saving the ion token runs `IonTest` at once.

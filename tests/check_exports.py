@@ -278,6 +278,24 @@ if LOC and (LOC.get("location_auto") or {}).get("origin"):
 elif LOC:
     check(False, "location_auto: origin printed")
 
+hr = (LOC or {}).get("height_rule")
+check(hr is not None, "height_rule: recorded")
+if hr:
+    check(hr["far_refused"] and hr["after_far"] == hr["before"],
+          f"height_rule: a scripted move to Bavaria without a height stops, map origin unchanged ({hr['after_far']})")
+    try:
+        nb = [float(v) for v in hr["after_near"].split(",")]
+        b0 = [float(v) for v in hr["before"].split(",")]
+        moved = math.hypot(nb[0] - b0[0], nb[1] - b0[1])
+        check(hr["near_kept"] and nb[2] == b0[2] and 80 < moved < 110,
+              f"height_rule: a 95 m move without a height keeps H {nb[2]} (moved {moved:.1f} m)")
+    except Exception as ex:
+        check(False, f"height_rule: near move ({ex})")
+
+sw = (LOC or {}).get("size_warning")
+check(sw is not None and sw["exported"] and sw["warned"] and sw["only_5_mm"],
+      f"size_warning: a 5 mm model in a millimetre document is exported with a units warning ({sw})")
+
 if LOC and "lv95_ion" in files and "lv95" in files:
     io = (LOC.get("lv95_ion") or {}).get("origin")
     check(io is not None, "lv95_ion: origin printed (map coordinates placed without a Location)")

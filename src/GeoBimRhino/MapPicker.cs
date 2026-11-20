@@ -20,8 +20,10 @@ namespace GeoBimRhino
     /// national map and aerial images (Switzerland) and BKG's TopPlusOpen (Europe, world; taken
     /// automatically outside Switzerland), a search box, the model outline. Pick mode: a click
     /// places the marker, the outline follows it, OK returns latitude/longitude. Show mode: just
-    /// the map. The page talks to the plugin through document.title: "geobim:lat,lon" reports a
-    /// click, "geobim-search:n:text" asks for a search, which the plugin runs (Places: swisstopo
+    /// the map. After a pick the page reads the terrain height there from Mapterhorn's Terrarium
+    /// tiles (tiles.mapterhorn.com, heights above sea level; the browser decodes the WebP).
+    /// The page talks to the plugin through document.title: "geobim:lat,lon" reports a
+    /// click, "geobim:lat,lon,height" adds the terrain, "geobim-search:n:text" asks for a search, which the plugin runs (Places: swisstopo
     /// and Nominatim, with the plugin's User-Agent and Nominatim's rate limit) and hands back with
     /// showHits(…).
     /// </summary>
@@ -37,10 +39,17 @@ namespace GeoBimRhino
             public bool Swiss;                                     // start on swisstopo's map (else BKG's)
         }
 
-        /// <summary>Shows the map; in pick mode the clicked position, else null</summary>
-        public static (double Lat, double Lon)? Show(Options o)
+        /// <summary>The picked position and, when Mapterhorn answered, the terrain height there</summary>
+        public class Pick
         {
-            (double, double)? picked = null;
+            public double Lat, Lon;
+            public double? Terrain;   // metres above sea level (Mapterhorn)
+        }
+
+        /// <summary>Shows the map; in pick mode the clicked position, else null</summary>
+        public static Pick Show(Options o)
+        {
+            Pick picked = null;
             var web = new Eto.Forms.WebView();
             var info = new Eto.Forms.Label { Text = o.Pick ? "Click the point on the map, or search a place or address." : "Orange: the model's outline." };
             var ok = new Eto.Forms.Button { Text = o.Pick ? "OK" : "Close", Enabled = !o.Pick };
@@ -58,12 +67,18 @@ namespace GeoBimRhino
                 }
                 if (!t.StartsWith("geobim:", StringComparison.Ordinal)) return;
                 var parts = t.Substring(7).Split(',');
-                if (parts.Length == 2 &&
+                if ((parts.Length == 2 || parts.Length == 3) &&
                     double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double lat) &&
                     double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double lon))
                 {
-                    picked = (lat, lon);
-                    info.Text = string.Format(CultureInfo.InvariantCulture, "{0:0.000000}° N, {1:0.000000}° E", lat, lon);
+                    double? h = parts.Length == 3 && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double hv)
+                        ? hv : (double?)null;
+                    // the height arrives after the click; it only counts for the position it was read for
+                    if (h != null && (picked == null || picked.Lat != lat || picked.Lon != lon)) return;
+                    if (h == null) picked = new Pick { Lat = lat, Lon = lon };
+                    else picked.Terrain = h;
+                    info.Text = string.Format(CultureInfo.InvariantCulture, "{0:0.000000}° N, {1:0.000000}° E", lat, lon)
+                                + (picked.Terrain != null ? string.Format(CultureInfo.InvariantCulture, " — terrain {0:0.0} m (Mapterhorn)", picked.Terrain) : "");
                     ok.Enabled = true;
                 }
             };
@@ -160,13 +175,59 @@ function drawOutline(pts) {
   if (outline) outline.setLatLngs(pts);
   else outline = L.polygon(pts, {color: '#FF8A00', weight: 2, fillOpacity: 0.15, interactive: false}).addTo(map);
 }
+// Terrain height (m above sea level) from Mapterhorn's Terrarium tiles, the deepest zoom that has the
+// point (404 = no tile at that zoom); undefined when a newer pick came meanwhile, null without data
+var terrainSeq = 0, terrainCredit = false;
+function terrainAt(lat, lon) {
+  var seq = ++terrainSeq;
+  function tryZoom(z) {
+    if (z < 0) return Promise.resolve(null);
+    var n = Math.pow(2, z), s = Math.sin(lat * Math.PI / 180);
+    var x = (lon + 180) / 360 * n, y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n;
+    var tx = Math.floor(x), ty = Math.floor(y);
+    return fetch('https://tiles.mapterhorn.com/' + z + '/' + tx + '/' + ty + '.webp')
+      .then(function (r) {
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.blob();
+      })
+      .then(function (blob) {
+        if (!blob) return tryZoom(z - 1);
+        return createImageBitmap(blob, {colorSpaceConversion: 'none', premultiplyAlpha: 'none'}).then(function (img) {
+          var c = document.createElement('canvas');
+          c.width = img.width; c.height = img.height;
+          var ctx = c.getContext('2d', {willReadFrequently: true});
+          ctx.drawImage(img, 0, 0);
+          // bilinear between pixel centres, Terrarium: R·256 + G + B/256 − 32768
+          var px = (x - tx) * img.width - 0.5, py = (y - ty) * img.height - 0.5;
+          var x0 = Math.max(0, Math.min(img.width - 2, Math.floor(px))), y0 = Math.max(0, Math.min(img.height - 2, Math.floor(py)));
+          var fx = Math.max(0, Math.min(1, px - x0)), fy = Math.max(0, Math.min(1, py - y0));
+          var d = ctx.getImageData(x0, y0, 2, 2).data;
+          function h(i) { return d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768; }
+          return h(0) * (1 - fx) * (1 - fy) + h(4) * fx * (1 - fy) + h(8) * (1 - fx) * fy + h(12) * fx * fy;
+        });
+      });
+  }
+  return tryZoom(17).then(function (h) { return seq === terrainSeq ? h : undefined; });
+}
 function place(lat, lon, report) {
   if (marker) marker.setLatLng([lat, lon]); else marker = L.marker([lat, lon], {interactive: false}).addTo(map);
   if (cfg.outline) {
     var k = Math.cos(lat * Math.PI / 180);
     drawOutline(cfg.outline.map(function (p) { return [lat + p[1] / 111320, lon + p[0] / (111320 * k)]; }));
   }
-  if (report) document.title = 'geobim:' + lat.toFixed(8) + ',' + lon.toFixed(8);
+  if (report) {
+    var ll = lat.toFixed(8) + ',' + lon.toFixed(8);
+    document.title = 'geobim:' + ll;
+    terrainAt(lat, lon).then(function (h) {
+      if (h === undefined || h === null || !isFinite(h)) return;
+      if (!terrainCredit) {
+        map.attributionControl.addAttribution('Terrain &copy; <a href=""https://mapterhorn.com/attribution"">Mapterhorn</a>');
+        terrainCredit = true;
+      }
+      document.title = 'geobim:' + ll + ',' + h.toFixed(2);
+    }).catch(function () { /* no height: the command asks for it */ });
+  }
 }
 if (cfg.outlineLatLon) drawOutline(cfg.outlineLatLon);
 if (cfg.lat !== null) place(cfg.lat, cfg.lon, false);

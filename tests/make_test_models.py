@@ -194,6 +194,49 @@ def run_location_case():
     ion_ifc("location_ion")
     ion_ifc("location_auto", "0")   # geoid undulation from the plugin's EGM2008 grid
 
+    # height rule: a script that moves the model far away without a height must stop and leave the
+    # map origin alone; a small move (about 95 m north) without a height keeps the height. A block at
+    # z 0 with a Swiss map origin at 500 m: its z values are not heights above sea level
+    doc.Objects.Clear()
+    doc.Objects.AddBrep(box(0, 0, 0, 10, 10, 3, rg.Vector3d.Zero),
+                        attrs(doc, "Bauteile::Platten", System.Drawing.Color.Gray, "Testblock"))
+    doc.Strings.SetString("geobim", "mapOrigin", "2755000,1206000,500,0")
+    doc.Strings.SetString("geobim", "epsg", "2056")
+    before = doc.Strings.GetValue("geobim", "mapOrigin")
+    mark = history_mark()
+    # no input after the position: the command must stop at the height (nothing for it to take)
+    far = Rhino.RhinoApp.RunScript("_-GeoBIMLocation _Enter 49.238774,11.188438", False)
+    far_text = history_since(mark)
+    after_far = doc.Strings.GetValue("geobim", "mapOrigin")
+    mark = history_mark()
+    # Enter takes the proposed height, the second Enter map north
+    near = Rhino.RhinoApp.RunScript("_-GeoBIMLocation _Enter 46.9878,9.4763209037 _Enter _Enter", False)
+    near_text = history_since(mark)
+    RESULTS["height_rule"] = {
+        "before": before, "after_far": after_far, "after_near": doc.Strings.GetValue("geobim", "mapOrigin"),
+        "far_refused": "no height known" in far_text, "near_kept": "not proposed" not in near_text,
+    }
+    log("height rule: far RunScript=%s, near RunScript=%s" % (far, near))
+    log(far_text.strip())
+    log(near_text.strip())
+
+    # units check: a "5 m" cube drawn as 5 in a millimetre document is 5 mm; the export says so
+    doc.AdjustModelUnitSystem(Rhino.UnitSystem.Millimeters, False)
+    doc.Objects.Clear()
+    doc.Objects.AddBrep(box(0, 0, 0, 5, 5, 5, rg.Vector3d.Zero),
+                        attrs(doc, "Bauteile::Platten", System.Drawing.Color.Gray, "Würfel 5 mm"))
+    tiny = os.path.join(OUT, "tiny_mm.ifc")
+    if os.path.exists(tiny):
+        os.remove(tiny)
+    mark = history_mark()
+    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMExportIfc _Enter "%s"' % tiny, False)
+    tiny_text = history_since(mark)
+    RESULTS["size_warning"] = {"exported": os.path.exists(tiny), "warned": "check the units" in tiny_text,
+                               "only_5_mm": "only 5 mm across" in tiny_text}
+    log("size warning: RunScript=%s" % ok)
+    log(tiny_text.strip())
+    doc.AdjustModelUnitSystem(Rhino.UnitSystem.Meters, False)
+
 
 def run_case(name, offset, anchor, map_origin=None):
     doc = sc.doc

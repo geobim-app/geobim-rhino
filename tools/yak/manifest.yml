@@ -5,10 +5,11 @@ version: 0.0.0
 authors:
 - Christof Lorenz
 description: >
-  Uploads Rhino models to geoBIM.app and Cesium ion, georeferenced: the selected objects become
-  an IFC 4 (or GLB) with colours, layers and user text as properties, are converted to 3D Tiles
-  and open in the browser in place. Georeferencing from map coordinates (UTM, LV95, Gauss-Krüger,
-  Austrian systems), a map origin stored in the document, or the EarthAnchorPoint.
+  Beta. Puts Rhino models in their place on the map: uploads them to geoBIM.app (as IFC 4, converted to
+  3D Tiles, or as GLB; opened in the browser in place) or to your own Cesium ion account, and exports IFC 4 and GLB.
+  GeoBIMLocation georeferences a model in one step: a point of the model and its position as map coordinates
+  (LV95, UTM, Gauss-Krüger, …), latitude/longitude, a place or address, or a click on a map. Uploads to
+  geoBIM.app need an account (ask at info@geobim.app); export, georeferencing and Cesium ion work without it.
 url: https://geobim.app
 icon: icon.png
 keywords:
