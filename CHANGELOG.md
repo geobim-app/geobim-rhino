@@ -24,6 +24,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   meridian convergence. `Show` displays the model's outline on the map. Replaces `GeoBIMMapOrigin` (never
   released). The plugin converts LV95 (Swiss oblique Mercator, CH1903+ → WGS84 as EPSG:1676) and UTM (ETRS89/WGS84,
   Krüger series) itself; `tests/geo_check` checks it against pyproj (below 0.2 mm, convergence to 0.00001°).
+  Reference: `docs/GeoBIMLocation.md` (prompts, input formats, coordinate system, height, north, stored values,
+  scripting, messages, accuracy, network).
   - **GLB and Cesium ion follow the map position**: they take latitude/longitude and true north from the map
     origin, or from the map coordinates of models drawn in LV95/UTM (base point: the model centre rounded to
     metres), and fall back to Rhino's Location only for other systems. Models in map coordinates can now be

@@ -95,7 +95,8 @@ the map origin and Rhino's Location from one input, so all formats agree; export
   - Keep `net7.0`, which loads in every Rhino 8.
 - **Formatting:** numbers in files and in scriptable input use `CultureInfo.InvariantCulture`.
 - **Documentation:** every user-visible change gets a `CHANGELOG.md` entry (Keep a Changelog, `[Unreleased]`) and,
-  if it changes usage, a README update.
+  if it changes usage, a README update. Changes to `GeoBIMLocation` or to how exports are placed also go into
+  `docs/GeoBIMLocation.md` (its prompts, defaults and messages are quoted there).
 
 ## Operating Rhino for someone (rhino-mcp or scripts)
 

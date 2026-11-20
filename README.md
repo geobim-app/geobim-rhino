@@ -69,6 +69,9 @@ Cesium ion are placed from it too (LV95, UTM).
 Network: the address search and `Terrain` ask swisstopo's geo.admin.ch API; the map window loads Leaflet from unpkg
 and map tiles from swisstopo and BKG. Typed coordinates are converted offline.
 
+**Full reference:** [docs/GeoBIMLocation.md](docs/GeoBIMLocation.md): all prompts and input formats, how the
+coordinate system, height and map north are chosen, what is stored, scripting, messages and accuracy.
+
 ## GLB instead of IFC
 
 For sculptures, design studies and anything where the look matters more than IFC classes and
