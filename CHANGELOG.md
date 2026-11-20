@@ -7,6 +7,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Map origin for local coordinates** (`MapOrigin.cs`, `ModelExport.cs`, `Commands.cs`): new command
+  `GeoBIMMapOrigin` stores E0, N0, H0 and an optional rotation in the document (`doc.Strings`
+  `geobim/mapOrigin`). The IFC export then writes `IfcMapConversion` from them (Eastings/Northings/
+  OrthogonalHeight, XAxisAbscissa/Ordinate) and leaves the local geometry as it is. A model no longer
+  needs a second copy shifted to real map coordinates. Geometry that already lies in map coordinates
+  ignores the map origin; GLB is still placed by the EarthAnchorPoint. `GeoBIMSettings` shows the
+  document's map origin. Idea from EarthLink (github.com/J1mmywzh/EarthLink, MIT): the placement is
+  data kept with the document, the geometry never moves.
+- **Test cases** `lv95`, `origin`, `origin_rot` in `tests/make_test_models.py` and
+  `tests/check_exports.py`, which validates all test IFCs with IfcOpenShell and compares the absolute
+  coordinates of the map-origin cases with the model in real LV95 coordinates.
+- **`CLAUDE.md`**: build and test commands, source map, where settings live, code rules and rules for
+  operating Rhino for someone (after EarthLink's agent guide).
 - **GLB upload** (`GlbWriter.cs`, `Commands.cs`, `GeoBimClient.cs`, `ModelExport.cs`): `GeoBIMUpload`
   has *Format = IFC/GLB* (remembered per document; IFC and GLB are separate models with their own
   replace link). GLB is written by the plugin (binary glTF 2.0, Y-up, one node per object, vertex

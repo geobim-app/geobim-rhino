@@ -31,11 +31,13 @@ namespace GeoBimRhino
     /// instances: one per component, with the instance transform), geometry as
     /// render meshes in metres, relative to an origin chosen by the
     /// georeferencing so float vertices keep millimetres:
-    ///  1. map coordinates (|x| or |y| &gt; 100 km): IfcMapConversion, EPSG from
+    ///  1. map origin stored in the document (local coordinates, see MapOrigin):
+    ///     IfcMapConversion with that origin, geometry unchanged;
+    ///  2. map coordinates (|x| or |y| &gt; 100 km): IfcMapConversion, EPSG from
     ///     the caller (setting, document choice, CrsDetect, or asked);
-    ///  2. EarthAnchorPoint set: IfcSite RefLatitude/RefLongitude/RefElevation,
+    ///  3. EarthAnchorPoint set: IfcSite RefLatitude/RefLongitude/RefElevation,
     ///     model base point as origin, model north as TrueNorth;
-    ///  3. otherwise none: geoBIM.app drops the model at the centre of the view.
+    ///  4. otherwise none: geoBIM.app drops the model at the centre of the view.
     /// </summary>
     public static class ModelExport
     {
@@ -51,7 +53,9 @@ namespace GeoBimRhino
         }
 
         /// <param name="resolveEpsg">EPSG for map coordinates (easting, northing of the model centre in metres); null cancels</param>
-        public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, Func<double, double, int?> resolveEpsg)
+        /// <param name="mapOrigin">map origin of local coordinates (the document's, see MapOrigin), or null to ignore it</param>
+        public static ExportResult Build(RhinoDoc doc, IList<RhinoObject> objects, string name, Func<double, double, int?> resolveEpsg,
+                                         MapOrigin mapOrigin = null)
         {
             var res = new ExportResult();
             var model = new IfcModelData
@@ -77,7 +81,26 @@ namespace GeoBimRhino
             // ---- Georeferencing → origin (model units) ----
             Point3d origin;
             var anchor = doc.EarthAnchorPoint;
-            if (CrsDetect.LooksLikeMap(cx, cy))
+            bool inMapCoords = CrsDetect.LooksLikeMap(cx, cy);
+            if (mapOrigin != null && !inMapCoords)
+            {
+                // Local coordinates + stored map origin: the geometry stays as it is
+                mapOrigin.ToMap(cx, cy, out double me, out double mn);
+                int? chosen = resolveEpsg(me, mn);
+                if (chosen == null) { res.Cancelled = true; return res; }
+                int epsg = chosen.Value;
+                origin = Point3d.Origin;
+                model.GeoRef = GeoRefKind.MapConversion;
+                model.CrsName = "EPSG:" + epsg;
+                model.Eastings = mapOrigin.E;
+                model.Northings = mapOrigin.N;
+                model.OrthogonalHeight = mapOrigin.H;
+                model.XAxisAbscissa = mapOrigin.XAxisAbscissa;
+                model.XAxisOrdinate = mapOrigin.XAxisOrdinate;
+                res.Epsg = epsg.ToString();
+                res.GeoRefInfo = $"map origin, EPSG:{epsg} ({mapOrigin.Describe()})";
+            }
+            else if (inMapCoords)
             {
                 int? chosen = resolveEpsg(cx, cy);
                 if (chosen == null) { res.Cancelled = true; return res; }
@@ -90,7 +113,8 @@ namespace GeoBimRhino
                 model.Northings = oy;
                 model.OrthogonalHeight = 0;
                 res.Epsg = epsg.ToString();
-                res.GeoRefInfo = $"map coordinates, EPSG:{epsg} (origin E {ox:0} N {oy:0})";
+                res.GeoRefInfo = $"map coordinates, EPSG:{epsg} (origin E {ox:0} N {oy:0})"
+                                 + (mapOrigin != null ? " — the document's map origin is ignored, the geometry already lies in map coordinates" : "");
             }
             else if (anchor != null && anchor.EarthLocationIsSet())
             {

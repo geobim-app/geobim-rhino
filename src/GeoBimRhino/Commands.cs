@@ -137,12 +137,16 @@ namespace GeoBimRhino
         {
             // GLB is placed by lat/lon (EarthAnchorPoint); map coordinates would need a
             // projection the plugin doesn't have, so don't ask for an EPSG code there
-            var res = ModelExport.Build(doc, objects, name, (e, n) => glb ? 0 : ResolveEpsg(doc, e, n, mode));
+            // and leave the document's map origin to the IFC export
+            var mapOrigin = MapOrigin.FromDoc(doc);
+            var res = ModelExport.Build(doc, objects, name, (e, n) => glb ? 0 : ResolveEpsg(doc, e, n, mode), glb ? null : mapOrigin);
             if (res.Cancelled) return res;
             if (glb)
             {
                 if (res.Model.GeoRef == GeoRefKind.MapConversion)
                     throw new InvalidOperationException("GLB needs the model near the origin with a Location (EarthAnchorPoint) — for map coordinates use Format=IFC");
+                if (mapOrigin != null && res.Model.GeoRef != GeoRefKind.SiteLatLon)
+                    RhinoApp.WriteLine("geoBIM.app: GLB is placed by the Location (EarthAnchorPoint), not by the map origin — set a Location or use Format=IFC.");
                 if (res.Elements > 0) GlbWriter.Write(res.Model, path);
             }
             else IfcWriter.Write(res.Model, path);
@@ -164,7 +168,9 @@ namespace GeoBimRhino
             while (true)
             {
                 var go = new GetOption();
-                go.SetCommandPrompt($"geoBIM.app — server {p.Server}, token {GeoBimPlugin.MaskedToken(p.Token)}, EPSG {p.Epsg} (default UTM {p.DefaultUtmEpsg})");
+                var origin = MapOrigin.FromDoc(doc);
+                go.SetCommandPrompt($"geoBIM.app — server {p.Server}, token {GeoBimPlugin.MaskedToken(p.Token)}, EPSG {p.Epsg} (default UTM {p.DefaultUtmEpsg})"
+                                    + (origin != null ? $", map origin {origin.Describe()}" : ""));
                 int oServer = go.AddOption("Server");
                 int oLive = go.AddOption("Live");
                 int oBeta = go.AddOption("Beta");
@@ -318,6 +324,66 @@ namespace GeoBimRhino
                 RhinoApp.WriteLine("geoBIM.app: export failed — {0}", ex.Message);
                 return Result.Failure;
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    /// <summary>
+    /// Map origin of this document: the model stays in local coordinates and the
+    /// IFC export writes IfcMapConversion from E0/N0/H0 (and a rotation), so no
+    /// second copy of the model in real map coordinates is needed.
+    /// Scripted: -GeoBIMMapOrigin 2755000,1206000,0,0 or -GeoBIMMapOrigin Clear
+    /// </summary>
+    [Guid("714cd07f-7895-4bf7-a22c-4a77bc5acd3e")]
+    public class GeoBIMMapOriginCommand : Command
+    {
+        public override string EnglishName => "GeoBIMMapOrigin";
+
+        protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+        {
+            var current = MapOrigin.FromDoc(doc);
+            RhinoApp.WriteLine(current == null
+                ? "geoBIM.app: this document has no map origin (local coordinates are placed by the Location, if any)."
+                : $"geoBIM.app: map origin of this document: {current.Describe()} — local x = E − E0, y = N − N0, z = H − H0.");
+
+            var gs = new GetString();
+            gs.SetCommandPrompt("Map coordinates of the model origin E,N[,H[,rotation°]] (Enter keeps)");
+            if (current != null) gs.SetDefaultString(current.ToString());
+            gs.AcceptNothing(true);
+            int optClear = gs.AddOption("Clear");
+            var r = gs.Get();
+            if (r == GetResult.Option && gs.OptionIndex() == optClear)
+            {
+                MapOrigin.Clear(doc);
+                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
+                return Result.Success;
+            }
+            if (r == GetResult.Nothing) return Result.Success;
+            if (r != GetResult.String) return Result.Cancel;
+
+            var text = gs.StringResult().Trim();
+            if (text.Equals("Clear", StringComparison.OrdinalIgnoreCase))
+            {
+                MapOrigin.Clear(doc);
+                RhinoApp.WriteLine("geoBIM.app: map origin removed.");
+                return Result.Success;
+            }
+            var mo = MapOrigin.Parse(text);
+            if (mo == null)
+            {
+                RhinoApp.WriteLine("geoBIM.app: expected E,N[,H[,rotation]] in metres and degrees, e.g. 2755000,1206000,0,0");
+                return Result.Failure;
+            }
+            if (!CrsDetect.LooksLikeMap(mo.E, mo.N))
+            {
+                RhinoApp.WriteLine("geoBIM.app: E {0:0} N {1:0} are not map coordinates (more than 100 km from 0 expected).", mo.E, mo.N);
+                return Result.Failure;
+            }
+            mo.Save(doc);
+            var guess = CrsDetect.Guess(mo.E, mo.N, GeoBimPlugin.Instance.DefaultUtmEpsg);
+            RhinoApp.WriteLine("geoBIM.app: map origin set to {0}{1}. The IFC export writes IfcMapConversion; GLB still uses the Location.",
+                mo.Describe(), guess.Epsg != null ? $" (EPSG:{guess.Epsg}, {guess.Region})" : $" ({guess.Region}: the coordinate system is asked on export)");
+            return Result.Success;
         }
     }
 

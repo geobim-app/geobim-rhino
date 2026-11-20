@@ -4,9 +4,11 @@
 #   Rhino.exe /nosplash /runscript="_-RunPythonScript \"<repo>\tests\make_test_models.py\" _-Exit _No"
 #
 # Loads the built plugin (src/GeoBimRhino/bin/Release/net7.0/GeoBimRhino.rhp),
-# builds the same small model three times — in UTM map coordinates, with an
-# EarthAnchorPoint, without georeferencing — saves each as tests/out/<case>.3dm
-# and exports tests/out/<case>.ifc with _-GeoBIMExportIfc. Log: tests/out/log.txt
+# builds the same small model several times — in UTM map coordinates, with an
+# EarthAnchorPoint, without georeferencing, in LV95 map coordinates, and local
+# with a map origin (with and without rotation) — saves each as
+# tests/out/<case>.3dm and exports tests/out/<case>.ifc with _-GeoBIMExportIfc.
+# Log: tests/out/log.txt. Then check the IFCs: python tests/check_exports.py
 
 import os
 import math
@@ -96,9 +98,14 @@ def build(doc, offset, case):
                          attrs(doc, "Achsen", C.Black))
 
 
-def run_case(name, offset, anchor):
+def run_case(name, offset, anchor, map_origin=None):
     doc = sc.doc
     doc.Objects.Clear()
+    # map origin of local coordinates (GeoBIMMapOrigin), kept in the document
+    if map_origin:
+        doc.Strings.SetString("geobim", "mapOrigin", map_origin)
+    else:
+        doc.Strings.Delete("geobim", "mapOrigin")
     ep = Rhino.DocObjects.EarthAnchorPoint()
     if anchor:
         ep.EarthBasepointLatitude = 50.6745
@@ -128,6 +135,11 @@ try:
     run_case("utm", rg.Vector3d(373000, 5615000, 60), False)
     run_case("anchor", rg.Vector3d.Zero, True)
     run_case("local", rg.Vector3d(250, -40, 0), False)
+    # Swiss LV95: the same model once in real map coordinates, once local with a
+    # map origin (must give the same absolute coordinates), once with a rotation
+    run_case("lv95", rg.Vector3d(2600250, 1199960, 400), False)
+    run_case("origin", rg.Vector3d(250, -40, 400), False, "2600000,1200000,0,0")
+    run_case("origin_rot", rg.Vector3d(250, -40, 0), True, "2600000,1200000,400,30")
     log("done")
 except Exception:
     log(traceback.format_exc())

@@ -33,6 +33,7 @@ Rhino objects ──► IFC 4 (plugin) ──► api/pointcloud-upload.php ─�
 | `GeoBIMExportIfc` | Writes the IFC only (`-GeoBIMExportIfc` takes the file name on the command line, for scripts). |
 | `GeoBIMExportGlb` | Writes the GLB only (`-GeoBIMExportGlb` likewise) and prints the placement it would send. |
 | `GeoBIMOpen` | Opens the document's model (or the server) in the browser. |
+| `GeoBIMMapOrigin` | Map coordinates E,N[,H[,rotation]] of the model origin for models drawn in local coordinates (see *Georeferencing*); `Clear` removes them. Scripted: `-GeoBIMMapOrigin 2755000,1206000,0,0`. |
 | `GeoBIMSettings` | Server, token, EPSG, connection test. |
 | `GeoBIMToolbar` | Shows the geoBIM.app toolbar (Upload, Open, Export IFC, Settings). |
 
@@ -70,6 +71,13 @@ properties: `GeoBIMUpload` → *Format = GLB* (needs a geoBIM.app with GLB uploa
 
 ## Georeferencing (automatic)
 
+0. **Map origin** (`GeoBIMMapOrigin`): the model is drawn in small local coordinates
+   (x = E − E0, y = N − N0, z = H − H0) and the document remembers E0/N0/H0 and an optional
+   rotation (angle of the local x axis counter-clockwise from map east). The IFC export writes
+   `IfcMapConversion` from them and leaves the geometry as it is, so there is no need for a second
+   copy of the model moved to real map coordinates. The EPSG code is found as for map coordinates
+   below (LV95 → 2056). If the geometry already lies in map coordinates the map origin is ignored
+   (with a note). GLB is still placed by the Location (EarthAnchorPoint).
 1. **Map coordinates** — model centre more than 100 km from the origin: geometry relative to a
    rounded origin (keeps millimetres), `IfcMapConversion` + `IfcProjectedCRS "EPSG:<code>"`.
    With EPSG `auto` the plugin recognises:
@@ -99,14 +107,18 @@ dotnet build src/GeoBimRhino/GeoBimRhino.csproj -c Release
 
 ## Test
 
-`tests/make_test_models.py` builds the same small model three times (UTM map coordinates,
-EarthAnchorPoint, no georeferencing) inside Rhino and exports each with `-GeoBIMExportIfc`:
+`tests/make_test_models.py` builds the same small model in six cases (UTM map coordinates,
+EarthAnchorPoint, no georeferencing, LV95 map coordinates, local with a map origin, local with a
+rotated map origin) inside Rhino and exports each with `-GeoBIMExportIfc`:
 
 ```
 "C:\Program Files\Rhino 8\System\Rhino.exe" /nosplash /runscript="_-RunPythonScript ""<repo>\tests\make_test_models.py"""
+python tests/check_exports.py
 ```
 
-Output in `tests/out/` (not in git). Check the IFCs with IfcOpenShell and the geobim-tiler
+Output in `tests/out/` (not in git). `check_exports.py` validates every IFC with IfcOpenShell and
+checks that the map-origin cases give the same absolute coordinates as the model in real LV95
+coordinates. The geobim-tiler can tile them as well
 (`geobim_tile.py tests/out/utm.ifc --out tests/out/tiles_utm`).
 
 ## License
