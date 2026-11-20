@@ -41,10 +41,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `uploadToIon`), uploads the IFC to ion's S3 location (own AWS Signature V4, no AWS SDK), completes
   the upload and follows the tiling until the asset is ready. The IFC is written in east/north/up
   metres around the model's position (true north turned to +Y, no heading needed); the origin goes
-  to its lon/lat at the height above sea level plus the document's geoid undulation `GeoidN`.
+  to its lon/lat at the height above sea level plus the geoid undulation N.
   `GeoBIMSettings` gains `IonToken` and `IonTest`. `tests/sigv4_check` checks the signature against
   AWS's published S3 examples (`dotnet run`, both pass); `tests/make_test_models.py` writes the ion
-  IFCs of the EarthAnchorPoint, `GeoBIMLocation` and LV95 cases (`Upload=No`) and `check_exports.py` checks them.
+  IFCs of the EarthAnchorPoint, `GeoBIMLocation` and LV95 cases (`Upload=No`), one with N from the geoid
+  model, and `check_exports.py` checks them.
   - **Write permission**: `IonTest` checks it without creating anything (an empty `POST /v1/assets`).
     Ion answers writes of a token without `assets:write` with `404 ResourceNotFound`
     (`/v1/assets?assetRegion=us-east-1`), not 403 — seen on 2026-11-19 with a read-only token; upload
@@ -52,8 +53,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **S3 region from ion**: ion sends the account's storage region with the upload location
     (`region`, e.g. `eu-west-1` with bucket `cesiumion-assets-production-eu-west-1`) and the upload is
     signed for it. If S3 names another region anyway, the upload is retried once there.
-  - **GeoidN 0 counts as not set**, and the question has no default (an Enter on `<0>` would put the
-    model 48.7 m too low at the Taminabrücke).
+  - **Geoid undulation from the plugin** (`Geoid.cs`, `tools/make_geoid.py`): N comes from the models
+    the geobim-tiler uses, GCG2016 in Germany and EGM2008 elsewhere, embedded as grids (GCG2016 every
+    4th node of PROJ-data's grid, as geoBIM.app's viewer; EGM2008 every 5' over Europe and every 1°
+    worldwide; 330 KB). `tests/geo_check` compares them with PROJ's full grids: within 2.5 cm at the
+    test points in Europe (GCG2016 within 4 mm). The question for `GeoidN` is gone; the option sets a
+    document's own value, 0 goes back to the model, and the command prints N with its source.
   - Checked end-to-end on 2026-11-19: Taminabrücke uploaded to Cesium ion (EU account), tiled with
     the BIM/CAD tiler in about 4 minutes; tileset transform exactly at the Location, bridge centre
     0.13 m / 0.08 m from the LV95 position computed with pyproj.

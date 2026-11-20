@@ -20,6 +20,8 @@ what changed recently.
   against pyproj. Exit code 0 means everything passed.
 - Projection maths: `dotnet run` in `tests/geo_check` checks `GeoProj.cs` (LV95, UTM, convergence, parsing of
   typed positions) against pyproj values; all must pass (well below a millimetre).
+- Geoid grids: `python tools/make_geoid.py` rebuilds `src/GeoBimRhino/Resources/geoid/*.bin` from PROJ-data
+  (pyproj fetches the grids from cdn.proj.org); they are embedded resources of the plugin.
 - Toolbar: `python tools/make_icons.py && python tools/make_rui.py`. Buttons and their left/right macros are in
   `BUTTONS` in `make_rui.py`; the icons are drawn in `make_icons.py` (SVG for light and dark mode in
   `tools/icons/`, PNG strips as fallback). The SVG goes into the `.rui` as real XML inside `<icon><light>`/`<dark>`:
@@ -37,6 +39,7 @@ what changed recently.
 | `MapOrigin.cs` | Map origin of local coordinates, stored in the document |
 | `GeoLocation.cs` | One position for all exports: placement for GLB/ion, setting map origin and Rhino's Location together, mismatch check |
 | `GeoProj.cs` | LV95 and UTM ↔ WGS84, meridian convergence, parsing typed positions (no Rhino types) |
+| `Geoid.cs` | Geoid undulation N from embedded grids (GCG2016 Germany, EGM2008 Europe 5' and world 1°; no Rhino types) |
 | `GeoAdmin.cs` | swisstopo search and terrain height (geo.admin.ch API, Switzerland) |
 | `MapPicker.cs` | Map window (Eto WebView, Leaflet, swisstopo and BKG tiles) to pick or show the position |
 | `CrsDetect.cs` | Which EPSG code map coordinates belong to (no Rhino types) |
@@ -68,7 +71,7 @@ the map origin and Rhino's Location from one input, so all formats agree; export
   | `format` | `ifc` or `glb` |
   | `epsg` | EPSG chosen for this document (also set by `GeoBIMLocation`) |
   | `mapOrigin` | `E,N,H,rotationDeg` |
-  | `geoidN` | geoid undulation for Cesium ion |
+  | `geoidN` | the document's own geoid undulation for Cesium ion (absent: from `Geoid.cs`) |
   | `ionasset` | last Cesium ion asset id |
 
 - **Per user:** `PlugIn.Settings` (`GeoBimPlugin.cs`). Keys: `server`, `token`, `epsg`, `defaultUtmEpsg`, `ionToken`,

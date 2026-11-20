@@ -137,8 +137,11 @@ Default at the height prompt:
 Check the default before pressing Enter: a wrong height moves the whole model up or down.
 
 The geoBIM.app server adds the geoid to these heights (GCG2016 in Germany, EGM2008 elsewhere). Cesium ion works
-with ellipsoidal heights; `GeoBIMUploadIon` asks once per document for the geoid undulation `GeoidN` (about 48.7 m
-in eastern Switzerland).
+with ellipsoidal heights, so `GeoBIMUploadIon` adds the geoid undulation N itself, from the same models embedded in
+the plugin: GCG2016 in Germany (not for models in LV95, as the tiler does), EGM2008 elsewhere. In Europe this is
+within a few centimetres of the full grids; outside Europe the plugin has EGM2008 only every 1° (up to about 2 m
+off in mountains). The command prints N and the model, e.g. `geoid undulation N = 48.72 m (EGM2008 at the model)`;
+its `GeoidN` option sets a document's own value instead, and `GeoidN=0` goes back to the model.
 
 ## Map north
 
@@ -189,7 +192,7 @@ H0 = H − z
 |---|---|
 | IFC (`GeoBIMUpload`, `GeoBIMExportIfc`) | `IfcMapConversion` (E0, N0, H0, rotation) and `IfcProjectedCRS EPSG:<code>`; the geometry stays in local coordinates |
 | GLB (`GeoBIMUpload` *Format = GLB*, `GeoBIMExportGlb`) | latitude/longitude of the model centre (rounded to metres), its height above sea level, true north as heading |
-| Cesium ion (`GeoBIMUploadIon`) | the IFC in east/north/up metres around the same base point (true north turned to +Y); ion places its origin at that point's latitude/longitude, height + `GeoidN` |
+| Cesium ion (`GeoBIMUploadIon`) | the IFC in east/north/up metres around the same base point (true north turned to +Y); ion places its origin at that point's latitude/longitude, height + geoid undulation N (see [Height](#height)) |
 
 GLB and Cesium ion take their position from the map origin (or from the map coordinates of a model drawn in LV95 or
 UTM) and use Rhino's Location only when the coordinate system does not convert. Geometry that already lies in map

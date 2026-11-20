@@ -1,6 +1,7 @@
 // Checks GeoProj against pyproj 3.7.2 / PROJ 9.5.1 (reference values computed with
 // Transformer.from_crs(epsg, 4326) and Proj.get_factors(...).meridian_convergence),
-// and PositionText against the formats map.geo.admin.ch and Google Maps copy.
+// PositionText against the formats map.geo.admin.ch and Google Maps copy, and the embedded geoid
+// grids against PROJ's full grids (us_nga_egm08_25.tif, de_bkg_gcg2016.tif).
 using System;
 using GeoBimRhino;
 
@@ -13,6 +14,27 @@ static class Program
         public int Epsg; public double E, N, Lat, Lon, Conv;
         public R(int epsg, double e, double n, double lat, double lon, double conv) { Epsg = epsg; E = e; N = n; Lat = lat; Lon = lon; Conv = conv; }
     }
+
+    sealed class G
+    {
+        public string Name; public double Lat, Lon, N; public int Epsg; public string Model;
+        public G(string name, double lat, double lon, int epsg, double n, string model) { Name = name; Lat = lat; Lon = lon; Epsg = epsg; N = n; Model = model; }
+    }
+
+    // exact N from pyproj 3.7.2 with the full grids (EPSG:4326+3855 → 4979, EPSG:4258+7837 → 4937)
+    static readonly G[] Geoids =
+    {
+        new G("Pfaefers (LV95)", 46.986950, 9.476320, 2056, 48.715, "EGM"),
+        new G("Bern (LV95)", 46.951080, 7.438630, 2056, 49.372, "EGM"),
+        new G("Basel (LV95, near Germany)", 47.559600, 7.588600, 2056, 49.316, "EGM"),
+        new G("Muenchen", 48.137400, 11.575500, 25832, 45.658, "GCG"),
+        new G("Berlin", 52.516300, 13.377700, 25833, 39.318, "GCG"),
+        new G("Hamburg", 53.551100, 9.993700, 25832, 39.942, "GCG"),
+        new G("Garmisch (Zugspitze area)", 47.421000, 10.985300, 25832, 49.556, "GCG"),
+        new G("Wien", 48.208200, 16.373800, 25833, 44.730, "EGM"),
+        new G("Paris", 48.856600, 2.352200, 25831, 44.612, "EGM"),
+        new G("Chicago", 41.882684, -87.623328, 32616, -33.939, "EGM"),
+    };
 
     static readonly R[] Refs =
     {
@@ -73,6 +95,16 @@ static class Program
         P("Valens Post", PositionText.Kinds.Address, 0, 0, null);
         var bad = PositionText.Parse("46,9123 9,4877");
         Check("decimal commas are refused", bad == null, bad == null ? "" : bad.Kind.ToString());
+
+        // geoid: GCG2016 subset within 5 cm, EGM2008 5' within 8 cm, the 1° grid within 2.5 m
+        foreach (var g in Geoids)
+        {
+            var r = Geoid.At(g.Lat, g.Lon, g.Epsg);
+            bool model = r != null && (g.Model == "GCG" ? r.Model == "GCG2016" : r.Model.StartsWith("EGM2008"));
+            double tol = r == null ? 0 : r.Model == "GCG2016" ? 0.05 : r.Coarse ? 2.5 : 0.08;
+            Check($"geoid {g.Name}", model && Math.Abs(r.N - g.N) <= tol,
+                  r == null ? "no grid" : $"{r.N:0.000} m {r.Model} (PROJ {g.N:0.000}, {r.N - g.N:+0.000;-0.000})");
+        }
 
         Console.WriteLine(_failed == 0 ? "all geo checks passed" : _failed + " geo checks FAILED");
         return _failed == 0 ? 0 : 1;

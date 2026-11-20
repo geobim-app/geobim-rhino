@@ -32,4 +32,10 @@
     <None Include="GeoBimRhino.rui" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Geoid grids for Cesium ion heights (tools/make_geoid.py): EGM2008 (NGA, public domain),
+         GCG2016 (BKG, CC BY 4.0, "Derived from work by BKG") -->
+    <EmbeddedResource Include="Resources\geoid\*.bin" LogicalName="GeoBimRhino.geoid.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

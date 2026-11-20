@@ -136,13 +136,14 @@ def numbers_after(text, key):
     return [float(v) for v in m.groups()] if m else None
 
 
-def ion_ifc(name):
-    """GeoBIMUploadIon with Upload=No: the ion IFC (nothing is sent) and the printed origin"""
+def ion_ifc(name, geoid="48.7"):
+    """GeoBIMUploadIon with Upload=No: the ion IFC (nothing is sent) and the printed origin;
+    GeoidN=0 takes the undulation from the plugin's geoid model"""
     tmp = os.path.join(System.IO.Path.GetTempPath(), "geobim-rhino", name + "_ion.ifc")
     if os.path.exists(tmp):
         os.remove(tmp)
     mark = history_mark()
-    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMUploadIon _Enter GeoidN=48.7 Upload=No "%s"' % name, False)
+    ok = Rhino.RhinoApp.RunScript('_SelNone _-GeoBIMUploadIon _Enter GeoidN=%s Upload=No "%s"' % (geoid, name), False)
     text = history_since(mark)
     dst = os.path.join(OUT, name + ".ifc")
     if os.path.exists(dst):
@@ -191,6 +192,7 @@ def run_location_case():
     RESULTS["location_glb"] = {"placement": [float(v) for v in m.groups()] if m else None}
     log("location: GLB RunScript=%s, exists=%s; %s" % (ok, os.path.exists(glb), text.strip()))
     ion_ifc("location_ion")
+    ion_ifc("location_auto", "0")   # geoid undulation from the plugin's EGM2008 grid
 
 
 def run_case(name, offset, anchor, map_origin=None):

@@ -927,7 +927,9 @@ namespace GeoBimRhino
     /// Rhino's Location); ion's BIM/CAD tiler places its origin at that lon/lat and
     /// the height above sea level plus the geoid undulation N (ion heights are
     /// ellipsoidal). Every upload is a new ion asset.
-    /// Scripted: _-GeoBIMUploadIon _Enter GeoidN=48.7 "name"
+    /// The geoid undulation comes from Geoid.cs (GCG2016 in Germany, EGM2008 elsewhere) unless the
+    /// document has its own (GeoidN option; 0 = from the model again).
+    /// Scripted: _-GeoBIMUploadIon _Enter "name"   or with the document's own: _-GeoBIMUploadIon _Enter GeoidN=48.7 "name"
     /// </summary>
     [Guid("d192ead3-ee5e-4009-9cb6-a78788f1f712")]
     public class GeoBIMUploadIonCommand : Command
@@ -963,48 +965,31 @@ namespace GeoBimRhino
                 if (r != Result.Success) return r;
 
                 string name = Shared.DocName(doc);
+                // GeoidN = 0: the undulation comes from the geoid model at the model's position (Geoid.cs);
+                // any other value is the document's own and is kept (0 is almost nowhere the true value)
                 string stored = doc.Strings.GetValue("geobim", Shared.DocGeoidKey);
-                // 0 counts as not set: the undulation is almost nowhere 0, and 0 is what an Enter on an empty prompt gives
-                bool geoidKnown = double.TryParse(stored ?? "", NumberStyles.Float, CultureInfo.InvariantCulture, out double geoidValue) && geoidValue != 0;
-                var geoid = new OptionDouble(geoidKnown ? geoidValue : 0, -120, 120);
+                bool manual = double.TryParse(stored ?? "", NumberStyles.Float, CultureInfo.InvariantCulture, out double geoidValue) && geoidValue != 0;
+                var geoid = new OptionDouble(manual ? geoidValue : 0, -120, 120);
                 var upload = new OptionToggle(true, "No", "Yes");
                 while (true)
                 {
                     var gs = new GetString();
-                    gs.SetCommandPrompt(geoidKnown
-                        ? "Asset name in Cesium ion"
-                        : "Asset name in Cesium ion (set GeoidN: geoid undulation in metres at the site, e.g. 48.7 in eastern Switzerland)");
+                    gs.SetCommandPrompt(geoid.CurrentValue != 0
+                        ? "Asset name in Cesium ion (GeoidN set for this document; 0 = from the geoid model)"
+                        : "Asset name in Cesium ion (GeoidN=0: geoid undulation from the geoid model at the model)");
                     gs.SetDefaultString(name);
                     gs.AcceptNothing(true);
-                    int optGeoid = gs.AddOptionDouble("GeoidN", ref geoid);
+                    gs.AddOptionDouble("GeoidN", ref geoid);
                     gs.AddOptionToggle("Upload", ref upload);
                     var gr = gs.Get();
-                    if (gr == GetResult.Option) { if (gs.OptionIndex() == optGeoid) geoidKnown = geoid.CurrentValue != 0; continue; }
+                    if (gr == GetResult.Option) continue;
                     if (gr == GetResult.String) { var s = gs.StringResult().Trim(); if (s.Length > 0) name = s; break; }
                     if (gr == GetResult.Nothing) break;
                     return Result.Cancel;
                 }
-                if (!geoidKnown)
-                {
-                    if (mode != RunMode.Interactive)
-                    {
-                        RhinoApp.WriteLine("Cesium ion: GeoidN is not set for this document — pass it as an option (GeoidN=48.7).");
-                        return Result.Cancel;
-                    }
-                    var gn = new GetNumber();   // no default: an Enter must not silently mean 0
-                    gn.SetCommandPrompt("Geoid undulation N at the site in metres (ellipsoid height − height above sea level, e.g. 48.7 in eastern Switzerland)");
-                    gn.SetLowerLimit(-120, false);
-                    gn.SetUpperLimit(120, false);
-                    gn.AcceptNothing(false);
-                    if (gn.Get() != GetResult.Number || gn.Number() == 0)
-                    {
-                        RhinoApp.WriteLine("Cesium ion: no geoid undulation given — upload cancelled.");
-                        return Result.Cancel;
-                    }
-                    geoid.CurrentValue = gn.Number();
-                }
-                double geoidN = geoid.CurrentValue;
-                doc.Strings.SetString("geobim", Shared.DocGeoidKey, geoidN.ToString("0.###", CultureInfo.InvariantCulture));
+                manual = geoid.CurrentValue != 0;
+                if (manual) doc.Strings.SetString("geobim", Shared.DocGeoidKey, geoid.CurrentValue.ToString("0.###", CultureInfo.InvariantCulture));
+                else doc.Strings.Delete("geobim", Shared.DocGeoidKey);
 
                 var dir = Path.Combine(Path.GetTempPath(), "geobim-rhino");
                 Directory.CreateDirectory(dir);
@@ -1013,6 +998,30 @@ namespace GeoBimRhino
                 try { res = Shared.ExportIon(doc, objects, name, path); }
                 catch (Exception ex) { RhinoApp.WriteLine("Cesium ion: export failed — {0}", ex.Message); return Result.Failure; }
                 if (res.Elements == 0) { RhinoApp.WriteLine("Cesium ion: no geometry to upload."); return Result.Nothing; }
+
+                var model = Geoid.At(res.IonLat, res.IonLon, res.IonEpsg);
+                double geoidN;
+                string geoidSource;
+                if (manual)
+                {
+                    geoidN = geoid.CurrentValue;
+                    geoidSource = "set in this document";
+                    RhinoApp.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                        "Cesium ion: geoid undulation N = {0:0.###} m, set in this document{1}.", geoidN,
+                        model != null ? string.Format(CultureInfo.InvariantCulture, " ({0} at the model gives {1:0.00} m; GeoidN=0 uses that)", model.Model, model.N) : ""));
+                }
+                else if (model != null)
+                {
+                    geoidN = model.N;
+                    geoidSource = model.Model;
+                    RhinoApp.WriteLine(string.Format(CultureInfo.InvariantCulture, "Cesium ion: geoid undulation N = {0:0.00} m ({1} at the model){2}.", geoidN, model.Model,
+                        model.Coarse ? "; outside Europe the plugin only has EGM2008 every 1°, which may be up to about 2 m off — set GeoidN if you know it" : ""));
+                }
+                else
+                {
+                    RhinoApp.WriteLine("Cesium ion: the geoid grids are missing from the plugin — set GeoidN (geoid undulation at the site in metres).");
+                    return Result.Failure;
+                }
 
                 double height = res.IonElevation + geoidN;
                 if (!upload.CurrentValue)
@@ -1029,8 +1038,8 @@ namespace GeoBimRhino
                 }
                 string description = string.Format(CultureInfo.InvariantCulture,
                     "Uploaded from Rhino ({0}) with geoBIM.app for Rhino {1}. Origin at {2:0.0000000}, {3:0.0000000}, " +
-                    "{4:0.###} m above sea level + geoid N {5:0.###} m = {6:0.###} m ellipsoidal.",
-                    Shared.DocName(doc), GeoBimPlugin.PluginVersion, res.IonLat, res.IonLon, res.IonElevation, geoidN, height);
+                    "{4:0.###} m above sea level + geoid N {5:0.###} m ({7}) = {6:0.###} m ellipsoidal.",
+                    Shared.DocName(doc), GeoBimPlugin.PluginVersion, res.IonLat, res.IonLon, res.IonElevation, geoidN, height, geoidSource);
 
                 uint docSerial = doc.RuntimeSerialNumber;
                 var client = new IonClient(p.IonToken);

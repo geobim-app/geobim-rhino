@@ -13,6 +13,8 @@
 #   location   local model placed by GeoBIMLocation from latitude/longitude (Pfaefers);
 #              with location.json (what Rhino stored and printed), location_ion.ifc
 #   lv95_ion   the lv95 model (map coordinates, no Location) as Cesium ion IFC
+#   location_auto  the location model's ion origin with GeoidN=0: the height must be EGM2008's
+#              undulation at the origin (pyproj with the full grid from cdn.proj.org)
 # lv95 and origin must give the same absolute coordinates; origin_rot must be
 # origin's local geometry turned 30° about the map origin; ion must be anchor's
 # geometry turned 30° onto true north. The GeoBIMLocation cases are checked against
@@ -258,6 +260,23 @@ if LOC and "location" in LOC:
         ok, worst, rem = compare(A, local_vertices(files["location_ion"]), lambda p: rot_z(p - b, -gb), 3 * TOL)
         check(ok, f"location_ion: geometry in east/north/up around the base point, turned by -{gb:.3f}° (max difference {worst:.2e} m)"
               + (f"; extents for {', '.join(rem)}" if rem else ""))
+
+if LOC and (LOC.get("location_auto") or {}).get("origin"):
+    au = LOC["location_auto"]["origin"]
+    io = (LOC.get("location_ion") or {}).get("origin")
+    check(io is not None and abs(au[0] - io[0]) < 1e-7 and abs(au[1] - io[1]) < 1e-7,
+          "location_auto: same origin as location_ion (only the geoid differs)")
+    try:
+        import pyproj
+        pyproj.network.set_network_enabled(True)
+        egm = Transformer.from_crs("EPSG:4326+3855", "EPSG:4979", always_xy=True).transform(au[0], au[1], 0.0)[2]
+    except Exception as ex:
+        egm = None
+        print("  skip location_auto: no EGM2008 grid from pyproj (%s)" % ex)
+    if egm is not None and math.isfinite(egm) and abs(egm) > 1:
+        check(abs(au[2] - egm) < 0.08, f"location_auto: height {au[2]} m = H0 0 + EGM2008 N {egm:.3f} m (full grid)")
+elif LOC:
+    check(False, "location_auto: origin printed")
 
 if LOC and "lv95_ion" in files and "lv95" in files:
     io = (LOC.get("lv95_ion") or {}).get("origin")

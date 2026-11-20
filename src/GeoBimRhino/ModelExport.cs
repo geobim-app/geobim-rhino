@@ -29,6 +29,8 @@ namespace GeoBimRhino
         public double IonLon, IonLat, IonElevation;
         // GLB / Cesium ion: why the map position could not be used (then Rhino's Location places it), else null
         public string PlacementNote;
+        // Cesium ion: coordinate system of the position (null for Rhino's Location), for the geoid choice
+        public int? IonEpsg;
     }
 
     public enum ExportTarget { Ifc, Glb, Ion }
@@ -111,6 +113,7 @@ namespace GeoBimRhino
                     res.IonLat = a.Lat;
                     res.IonLon = a.Lon;
                     res.IonElevation = a.Elevation;
+                    res.IonEpsg = a.Epsg;
                     res.GeoRefInfo = string.Format(System.Globalization.CultureInfo.InvariantCulture,
                         "east/north/up around {0:0.000000}, {1:0.000000}, {2:0.##} m from the {3} (true north {4:0.###}° clockwise from +Y)",
                         res.IonLat, res.IonLon, res.IonElevation, a.Source, -north * 180.0 / Math.PI);

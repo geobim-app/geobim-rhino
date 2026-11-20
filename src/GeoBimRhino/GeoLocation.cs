@@ -21,6 +21,7 @@ namespace GeoBimRhino
         public Vector3d North;               // true north in model coordinates (unit vector in the XY plane)
         public double Lat, Lon, Elevation;   // degrees; metres above sea level at BasePoint
         public string Source;                // for messages: "map origin (LV95)", "Rhino's Location", …
+        public int? Epsg;                    // coordinate system of the map position, null for Rhino's Location
     }
 
     /// <summary>
@@ -73,7 +74,8 @@ namespace GeoBimRhino
                     return new GeoAnchor
                     {
                         BasePoint = new Point3d(bx / scale, by / scale, 0), Lat = lat, Lon = lon, Elevation = mo.H,
-                        North = NorthInModel(epsg.Value, lat, lon, mo.RotationDeg), Source = $"map origin ({GeoProj.Name(epsg.Value)})"
+                        North = NorthInModel(epsg.Value, lat, lon, mo.RotationDeg), Source = $"map origin ({GeoProj.Name(epsg.Value)})",
+                        Epsg = epsg
                     };
                 note = epsg == null
                     ? "the map origin's coordinate system is not known yet (export an IFC once, or set it with GeoBIMSettings → EPSG)"
@@ -86,7 +88,8 @@ namespace GeoBimRhino
                     return new GeoAnchor
                     {
                         BasePoint = new Point3d(bx / scale, by / scale, 0), Lat = lat, Lon = lon, Elevation = 0,
-                        North = NorthInModel(epsg.Value, lat, lon, 0), Source = $"map coordinates ({GeoProj.Name(epsg.Value)})"
+                        North = NorthInModel(epsg.Value, lat, lon, 0), Source = $"map coordinates ({GeoProj.Name(epsg.Value)})",
+                        Epsg = epsg
                     };
                 note = epsg == null
                     ? "the coordinate system of the map coordinates is ambiguous (set it with GeoBIMSettings → EPSG)"

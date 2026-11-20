@@ -101,12 +101,15 @@ ion's BIM/CAD tiler turns it into a 3D Tiles asset.
 - **Placement** from the model's position (see *Where the model lies*), which is required: the IFC is
   written in east/north/up metres around the model centre (true north turned to +Y), and ion puts its
   origin at that point's longitude/latitude.
-- **Height**: ion works with heights above the ellipsoid, Rhino's Location with heights above sea
-  level. `GeoidN` (asked once, remembered in the document) is the geoid undulation at the site,
-  e.g. about 48.7 m in eastern Switzerland; the origin goes to *elevation + GeoidN*.
+- **Height**: ion works with heights above the ellipsoid, the model with heights above sea level. The
+  plugin adds the geoid undulation N at the model itself, from the models the geobim-tiler uses:
+  GCG2016 in Germany, EGM2008 elsewhere (embedded grids, within a few centimetres in Europe; outside
+  Europe EGM2008 every 1°, up to about 2 m off). The command prints N and the model. The option
+  `GeoidN` sets a document's own value (kept in the document); `GeoidN=0` goes back to the model.
 - **Every upload is a new asset** (ion has no replace); the command prints the asset id, follows
   the tiling and opens the asset page. Delete old assets in ion yourself.
-- Scripted: `_-GeoBIMUploadIon _Enter GeoidN=48.7 "Asset name"`.
+- Scripted: `_-GeoBIMUploadIon _Enter "Asset name"` (N from the geoid model), or with the document's own
+  value `_-GeoBIMUploadIon _Enter GeoidN=48.7 "Asset name"`.
 
 ## What ends up in the IFC
 
@@ -188,3 +191,7 @@ against pyproj. The geobim-tiler can tile them as well
 ## License
 
 [MPL 2.0](LICENSE) — © 2026 Christof Lorenz, geoBIM.app.
+
+Embedded data (`src/GeoBimRhino/Resources/geoid/`, built by `tools/make_geoid.py` from PROJ-data):
+EGM2008 (NGA, public domain); GCG2016 — Derived from work by BKG,
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
