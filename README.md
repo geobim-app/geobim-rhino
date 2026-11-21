@@ -15,7 +15,7 @@ Rhino 8 plugin (Windows) that puts Rhino models in their place on the map:
 Rhino objects ──► IFC 4 / GLB (plugin) ──► geoBIM.app (3D Tiles) or Cesium ion ──► viewer, georeferenced
 ```
 
-> **Beta.** Version 0.3.0 is a public beta. Please report problems and wishes to info@geobim.app.
+> **Beta.** Version 0.3.1 is a public beta. Please report problems and wishes to info@geobim.app.
 > **Uploads to geoBIM.app need a geoBIM.app account** with a plugin token; ask for one at info@geobim.app.
 > Export, georeferencing and Cesium ion (your own ion account) work without it.
 
@@ -82,8 +82,9 @@ way round.
    - latitude, longitude `46.98695, 9.47632` (Google Maps: right-click → copy) or `46°59'13"N 9°28'35"E`;
    - a place or address (`Valens`, `Marienplatz München`): swisstopo's search in Switzerland, OpenStreetMap's
      Nominatim elsewhere; pick from the list;
-   - **Map**: click the point on a map (swisstopo's map and aerial images, BKG TopPlusOpen elsewhere, search box);
-     the model's outline follows the marker.
+   - **Map**: click the point on a map (swisstopo's map and aerial images in Switzerland, USGS aerial images in the
+     USA, BKG TopPlusOpen elsewhere, search box); the model's outline follows the marker. Outside Switzerland,
+     Germany, Austria and the USA the map is coarser: type latitude, longitude there for a precise position.
 3. **The height** of that point above sea level. After a search or a map click Enter puts the point on the terrain
    (swisstopo in Switzerland, Mapterhorn elsewhere); otherwise Enter keeps the current height while the point stays
    within 1 km. `ModelHeights` keeps the model's z values as heights above sea level. Without a known height there
@@ -102,7 +103,7 @@ work for the IFC via the map origin; GLB and Cesium ion then need Rhino's Locati
 Cesium ion are placed from it too (LV95, UTM).
 
 Network: the address search asks swisstopo's geo.admin.ch API and OpenStreetMap's Nominatim, `Terrain` asks
-swisstopo; the map window loads Leaflet from unpkg, map tiles from swisstopo and BKG, and after a click the
+swisstopo; the map window loads Leaflet from unpkg, map tiles from swisstopo, BKG and USGS, and after a click the
 Mapterhorn terrain tile of the point. Typed coordinates are converted offline.
 
 **Full reference:** [docs/GeoBIMLocation.md](docs/GeoBIMLocation.md): all prompts and input formats, how the
@@ -153,10 +154,17 @@ ion's BIM/CAD tiler turns it into a 3D Tiles asset.
   resolved — one element per component, with the instance transform). Curves, points and
   annotations are skipped and counted.
 - **Geometry**: `IfcTriangulatedFaceSet` from the document's render mesh settings, in metres.
-- **IFC class**: user text `IfcClass` (e.g. `IfcWall`, `Slab`), else a layer whose name starts with
-  an IFC class (`IfcWall`, `IfcColumn – Stützen`), else `IfcBuildingElementProxy`.
-  Supported: Wall, Slab, Beam, Column, Roof, Footing, Member, Plate, Railing, Ramp, Stair,
-  Covering, CurtainWall, Chimney, ShadingDevice, Furniture, GeographicElement, BuildingElementProxy.
+- **IFC class**, in this order:
+  1. user text `IfcClass` on the object (`IfcWall`, `Wall` or `wall` all give `IfcWall`);
+  2. for objects inside a block, user text `IfcClass` on the block instance;
+  3. the layer path, innermost layer first: the first layer whose name begins with an IFC class
+     (`Elements::IfcColumn – Columns`); only the first word counts;
+  4. else `IfcBuildingElementProxy`.
+
+  Supported: Wall, Slab, Beam, Column, Roof, Footing, Member, Plate, Railing, Ramp, Stair, Covering,
+  CurtainWall, Chimney, ShadingDevice, Furniture, GeographicElement, BuildingElementProxy — the classes
+  whose IFC 4 attributes match those of the proxy. Other classes (doors, windows, piles, bridge parts …)
+  become proxies. `PredefinedType` is always `NOTDEFINED`.
 - **Colour**: display colour (object / layer / parent), transparency from the material.
 - **Properties**: `Pset_Rhino` (Layer path, Name, ObjectId, Type, Block, Material) and
   `Pset_RhinoUserText` (all user text keys) — shown in geoBIM.app's InfoBox and filters.
