@@ -153,10 +153,17 @@ ion's BIM/CAD tiler turns it into a 3D Tiles asset.
   resolved — one element per component, with the instance transform). Curves, points and
   annotations are skipped and counted.
 - **Geometry**: `IfcTriangulatedFaceSet` from the document's render mesh settings, in metres.
-- **IFC class**: user text `IfcClass` (e.g. `IfcWall`, `Slab`), else a layer whose name starts with
-  an IFC class (`IfcWall`, `IfcColumn – Stützen`), else `IfcBuildingElementProxy`.
-  Supported: Wall, Slab, Beam, Column, Roof, Footing, Member, Plate, Railing, Ramp, Stair,
-  Covering, CurtainWall, Chimney, ShadingDevice, Furniture, GeographicElement, BuildingElementProxy.
+- **IFC class**, in this order:
+  1. user text `IfcClass` on the object (`IfcWall`, `Wall` or `wall` all give `IfcWall`);
+  2. for objects inside a block, user text `IfcClass` on the block instance;
+  3. the layer path, innermost layer first: the first layer whose name begins with an IFC class
+     (`Elements::IfcColumn – Columns`); only the first word counts;
+  4. else `IfcBuildingElementProxy`.
+
+  Supported: Wall, Slab, Beam, Column, Roof, Footing, Member, Plate, Railing, Ramp, Stair, Covering,
+  CurtainWall, Chimney, ShadingDevice, Furniture, GeographicElement, BuildingElementProxy — the classes
+  whose IFC 4 attributes match those of the proxy. Other classes (doors, windows, piles, bridge parts …)
+  become proxies. `PredefinedType` is always `NOTDEFINED`.
 - **Colour**: display colour (object / layer / parent), transparency from the material.
 - **Properties**: `Pset_Rhino` (Layer path, Name, ObjectId, Type, Block, Material) and
   `Pset_RhinoUserText` (all user text keys) — shown in geoBIM.app's InfoBox and filters.
