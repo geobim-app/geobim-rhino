@@ -5,6 +5,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-11-21
+
+### Fixed
+
+- **Map window outside Germany, Austria and Switzerland** (`MapPicker.cs`): zoomed in, the map turned white,
+  because BKG's TopPlusOpen has data down to zoom 18 only there (16 in the rest of Europe, 13 elsewhere) and
+  transparent tiles beyond. The page now stacks three TopPlusOpen layers so the deepest one with data shows
+  through, and opens at most two levels deeper than the data there (a model in Chicago or Tokyo opened on an
+  empty map).
+- **Map window search jumped back** (`MapPicker.cs`): picking a hit in the USA from the start view over Europe
+  set the marker in the USA but left the map over Germany. Adding the new layers made Leaflet start a zoom of its
+  own that landed after the jump; the map now has fixed zoom limits.
+
+### Added
+
+- **USGS aerial images in the USA** (`MapPicker.cs`): the map window's layer *USGS aerial (USA)*, The National
+  Map's imagery (public domain, down to zoom 16, about 1.8 m per pixel), taken automatically for a position or a
+  search hit in the USA. Where the images end (Canada, Mexico, open water) the server paints white; the page makes
+  that white transparent so TopPlusOpen shows there. From zoom 17 on, a NAIP image of the view (USDA, public
+  domain, 0.3–0.6 m) from the USGS image server is laid over the tiles once it has arrived (2–10 s), so a point
+  can be picked on a sharp image instead of the 4x enlarged zoom-16 tiles. Picking a point in the USA was not possible to better than about 20 m before.
+
 ## [0.3.0] — 2026-11-20
 
 ### Added

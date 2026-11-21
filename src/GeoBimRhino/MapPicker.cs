@@ -17,8 +17,9 @@ namespace GeoBimRhino
 {
     /// <summary>
     /// A map window (Eto WebView with Leaflet 1.9.4 from unpkg, pinned by its SRI hash): swisstopo's
-    /// national map and aerial images (Switzerland) and BKG's TopPlusOpen (Europe, world; taken
-    /// automatically outside Switzerland), a search box, the model outline. Pick mode: a click
+    /// national map and aerial images (Switzerland), USGS's aerial images (USA, public domain) and
+    /// BKG's TopPlusOpen (Europe, world); outside Switzerland the page takes USGS in the USA and
+    /// TopPlusOpen elsewhere by itself. A search box, the model outline. Pick mode: a click
     /// places the marker, the outline follows it, OK returns latitude/longitude. Show mode: just
     /// the map. After a pick the page reads the terrain height there from Mapterhorn's Terrarium
     /// tiles (tiles.mapterhorn.com, heights above sea level; the browser decodes the WebP).
@@ -154,6 +155,8 @@ html,body,#map{height:100%;margin:0;font:13px system-ui,sans-serif}
 #hits div{padding:6px 9px;cursor:pointer;border-top:1px solid #eee}
 #hits div:hover{background:#eef6ff}
 .leaflet-container{cursor:crosshair}
+.leaflet-image-layer.naip{animation:naipin .35s ease-out}
+@keyframes naipin{from{opacity:0}to{opacity:1}}
 </style></head><body>
 <div id=""map""></div>
 <div id=""bar""><div id=""row""><input id=""q"" placeholder=""Search a place or address""><button id=""go"" title=""Search"">Search</button></div><div id=""hits""></div></div>
@@ -164,11 +167,86 @@ function swiss(layer, ext, maxNative) {
     {maxZoom: 21, maxNativeZoom: maxNative, attribution: '&copy; swisstopo'});
 }
 var lk = swiss('ch.swisstopo.pixelkarte-farbe', 'jpeg', 18), img = swiss('ch.swisstopo.swissimage', 'jpeg', 20);
-var topo = L.tileLayer('https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png',
-  {maxZoom: 21, maxNativeZoom: 18, attribution: '&copy; BKG (dl-de/by-2-0)'});
-var map = L.map('map', {layers: [cfg.swiss ? lk : topo]});
-L.control.layers({'swisstopo map': lk, 'swisstopo aerial': img, 'TopPlusOpen (BKG)': topo}).addTo(map);
+// BKG's TopPlusOpen has data down to zoom 18 in Germany, Austria and Switzerland, 16 in the rest of Europe and 13
+// elsewhere; deeper tiles are transparent. Three copies on top of each other let the deepest one with data show
+// through, so the map never turns white when zoomed in.
+function topplus() {
+  return [[13, 0], [16, 14], [18, 17]].map(function (z, i) {
+    return L.tileLayer('https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png',
+      {maxZoom: 21, maxNativeZoom: z[0], minZoom: z[1], zIndex: i + 1, attribution: '&copy; BKG (dl-de/by-2-0)'});
+  });
+}
+var topo = L.layerGroup(topplus());
+// USGS aerial images (public domain): the world down to zoom 8, the USA down to zoom 16. Where it has none, its server
+// answers 404 and TopPlusOpen shows through, but along the edge of its images (borders, lakes, sea) it paints white:
+// whole white tiles near the USA at zoom 9-12, white parts of tiles elsewhere. The page makes that white transparent
+// (the server allows CORS, so it can read the pixels): a tile at least a tenth pure white loses its white.
+var usgs = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom: 21, maxNativeZoom: 16, zIndex: 4, crossOrigin: true, attribution: 'Imagery: USGS The National Map'});
+var probe = document.createElement('canvas').getContext('2d', {willReadFrequently: true});
+usgs.on('tileload', function (e) {
+  var t = e.tile;
+  if (t.getAttribute('data-checked')) return;   // the cleaned copy loading
+  t.setAttribute('data-checked', '1');
+  try {
+    var w = t.naturalWidth, h = t.naturalHeight;
+    probe.canvas.width = w; probe.canvas.height = h;
+    probe.drawImage(t, 0, 0);
+    var px = probe.getImageData(0, 0, w, h), d = px.data, white = 0, i;
+    for (i = 0; i < d.length; i += 4) if (d[i] === 255 && d[i + 1] === 255 && d[i + 2] === 255) white++;
+    if (white === w * h) { t.style.visibility = 'hidden'; return; }
+    if (white < w * h / 10) return;
+    for (i = 0; i < d.length; i += 4) if (d[i] >= 250 && d[i + 1] >= 250 && d[i + 2] >= 250) d[i + 3] = 0;
+    probe.putImageData(px, 0, 0);
+    t.src = probe.canvas.toDataURL();
+  } catch (err) { /* pixels not readable: keep the tile */ }
+});
+var usa = L.layerGroup(topplus().concat([usgs]));
+function inUSA(lat, lon) {
+  return (lat >= 24.4 && lat <= 49.4 && lon >= -125 && lon <= -66.9) ||   // contiguous states
+    (lat >= 51 && lat <= 71.5 && lon >= -180 && lon <= -129.9) ||         // Alaska
+    (lat >= 18.9 && lat <= 22.3 && lon >= -160.3 && lon <= -154.8);       // Hawaii
+}
+function baseAt(lat, lon) { return inUSA(lat, lon) ? usa : topo; }
+// the deepest zoom with data there (roughly, by boxes); the map opens at most two levels deeper
+function detailZoom(lat, lon) {
+  if (lat >= 45.8 && lat <= 55.1 && lon >= 5.8 && lon <= 17.2) return 18;                    // Germany, Austria, Switzerland
+  if (inUSA(lat, lon) || (lat >= 34 && lat <= 72 && lon >= -25 && lon <= 45)) return 16;     // USGS; TopPlusOpen in Europe
+  return 13;
+}
+// fixed zoom limits: without them Leaflet takes the limits from the layers and, while a layer group with minZoom
+// layers is added, starts a zoom that lands after a following setView and pulls the map back to where it was
+var map = L.map('map', {minZoom: 0, maxZoom: 21});
+L.control.layers({'swisstopo map': lk, 'swisstopo aerial': img, 'TopPlusOpen (BKG)': topo, 'USGS aerial (USA)': usa}).addTo(map);
 L.control.scale({imperial: false}).addTo(map);
+// Sharper aerial images in the USA: NAIP (USDA, public domain, 0.3-0.6 m) from the USGS image server. It renders on
+// request (2-10 s for a window), so from zoom 17 on the page asks for one image of the view after each move and lays
+// it over the USGS tiles when it has arrived; outside its images it is transparent (jpgpng).
+map.createPane('naip').style.zIndex = 250;
+var naip = null, naipSeq = 0, naipCredit = false;
+function updateNaip() {
+  var seq = ++naipSeq, c = map.getCenter();
+  if (!map.hasLayer(usa) || map.getZoom() < 17 || !inUSA(c.lat, c.lng)) {
+    if (naip) { map.removeLayer(naip); naip = null; }
+    return;
+  }
+  var b = map.getBounds(), sz = map.getSize(), r = Math.min(2, window.devicePixelRatio || 1);
+  var sw = L.CRS.EPSG3857.project(b.getSouthWest()), ne = L.CRS.EPSG3857.project(b.getNorthEast());
+  var url = 'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage?f=image&format=jpgpng'
+    + '&bboxSR=3857&imageSR=3857&bbox=' + [sw.x, sw.y, ne.x, ne.y].map(function (v) { return v.toFixed(2); }).join(',')
+    + '&size=' + Math.round(sz.x * r) + ',' + Math.round(sz.y * r);
+  var pre = new Image();
+  pre.onload = function () {
+    if (seq !== naipSeq) return;   // the view moved on meanwhile
+    var old = naip;
+    naip = L.imageOverlay(url, b, {pane: 'naip', interactive: false, className: 'naip'}).addTo(map);
+    if (old) map.removeLayer(old);
+    if (!naipCredit) { map.attributionControl.addAttribution('Imagery: USDA NAIP'); naipCredit = true; }
+  };
+  pre.src = url;
+}
+map.on('moveend', updateNaip);
+map.on('baselayerchange', updateNaip);
 var marker = null, outline = null;
 function drawOutline(pts) {
   if (!pts) return;
@@ -234,19 +312,23 @@ if (cfg.lat !== null) place(cfg.lat, cfg.lon, false);
 // show the outline and the marker together
 var view = outline ? outline.getBounds() : null;
 if (view && marker) view.extend(marker.getLatLng());
-if (view) map.fitBounds(view, {maxZoom: 19, padding: [60, 60]});
-else if (marker) map.setView(marker.getLatLng(), 17);
+var at = view ? view.getCenter() : marker ? marker.getLatLng() : null;
+if (view) map.fitBounds(view, {maxZoom: Math.min(19, detailZoom(at.lat, at.lng) + 2), padding: [60, 60]});
+else if (marker) map.setView(at, Math.min(17, detailZoom(at.lat, at.lng) + 2));
 else map.setView(cfg.swiss ? [46.8, 8.2] : [48.5, 9.5], cfg.swiss ? 8 : 6);
+var c0 = map.getCenter();
+useLayer(cfg.swiss ? lk : baseAt(c0.lat, c0.lng));
+updateNaip();
 if (cfg.pick) map.on('click', function (e) { place(e.latlng.lat, e.latlng.lng, true); });
-// swisstopo's tiles cover Switzerland only: outside it, take BKG's map
+// swisstopo's tiles cover Switzerland only: outside it, take BKG's map (USGS's aerial images in the USA)
 function inSwiss(lat, lon) { return lat >= 45.8 && lat <= 47.85 && lon >= 5.9 && lon <= 10.55; }
 function useLayer(layer) {
-  [lk, img, topo].forEach(function (l) { if (l !== layer && map.hasLayer(l)) map.removeLayer(l); });
+  [lk, img, topo, usa].forEach(function (l) { if (l !== layer && map.hasLayer(l)) map.removeLayer(l); });
   if (!map.hasLayer(layer)) map.addLayer(layer);
 }
 map.on('moveend', function () {
   var c = map.getCenter();
-  if (!inSwiss(c.lat, c.lng) && (map.hasLayer(lk) || map.hasLayer(img))) useLayer(topo);
+  if (!inSwiss(c.lat, c.lng) && (map.hasLayer(lk) || map.hasLayer(img))) useLayer(baseAt(c.lat, c.lng));
 });
 var q = document.getElementById('q'), hits = document.getElementById('hits'), searches = 0;
 function note(text) { var d = document.createElement('div'); d.className = 'note'; d.textContent = text; hits.appendChild(d); }
@@ -272,9 +354,9 @@ function showHits(r) {
     d.onclick = function () {
       hits.innerHTML = '';
       var swiss = inSwiss(h.lat, h.lon);
-      if (swiss && map.hasLayer(topo)) useLayer(lk);
-      if (!swiss) useLayer(topo);
-      map.setView([h.lat, h.lon], 18);
+      if (swiss && (map.hasLayer(topo) || map.hasLayer(usa))) useLayer(lk);
+      if (!swiss) useLayer(baseAt(h.lat, h.lon));
+      map.setView([h.lat, h.lon], Math.min(18, detailZoom(h.lat, h.lon) + 2));
       if (cfg.pick) place(h.lat, h.lon, true);
     };
     hits.appendChild(d);

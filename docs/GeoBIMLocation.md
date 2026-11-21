@@ -201,10 +201,24 @@ If one service does not answer, the other's hits are shown with a note.
 
 `Map` (pick) and `Show` open the same window:
 
-- **Layers** (top right): swisstopo's national map and aerial images (Switzerland) and BKG's TopPlusOpen (Europe
-  and world; in Germany down to buildings and house numbers). Outside Switzerland, swisstopo's tiles are empty, so
-  the map switches to TopPlusOpen when you leave Switzerland. A model without a position starts on TopPlusOpen over
-  central Europe.
+- **Layers** (top right): swisstopo's national map and aerial images (Switzerland), USGS aerial images (USA) and
+  BKG's TopPlusOpen (Europe and world). Outside Switzerland, swisstopo's tiles are empty, so the map switches to
+  USGS in the USA and to TopPlusOpen elsewhere when you leave Switzerland. A model without a position starts on
+  TopPlusOpen over central Europe.
+- **Detail** depends on the place. The window opens at most two zoom levels deeper than its map has data there:
+
+  | Where | Map | Detail down to |
+  |---|---|---|
+  | Switzerland | swisstopo map and aerial images | buildings, 10 cm aerial images |
+  | Germany, Austria | TopPlusOpen | buildings and house numbers (zoom 18) |
+  | rest of Europe | TopPlusOpen | streets and parks (zoom 16) |
+  | USA | USGS aerial images (The National Map); from zoom 17 USDA NAIP | about 1.8 m per pixel (zoom 16); NAIP 0.3–0.6 m |
+  | elsewhere | TopPlusOpen | main streets (zoom 13, about 15 m per pixel) |
+
+  In the USA, from zoom 17 on, the window also asks the USGS image server for one NAIP image of the view
+  (USDA, public domain); it is rendered on request and appears over the coarser tiles after 2–10 s.
+  Zoomed in deeper, the map is enlarged, not empty. Elsewhere a click is good to some 10–20 m; for more, type
+  latitude, longitude instead (Google Maps: right-click → copy).
 - **Search box** (top left, Enter or *Search*): places and addresses, swisstopo in Switzerland and OpenStreetMap
   elsewhere (see [Search](#search)). The plugin runs the search, not the page. A hit moves the map there, on
   swisstopo's map in Switzerland and on TopPlusOpen elsewhere. When picking, the hit also sets the marker.
@@ -308,9 +322,11 @@ Typed coordinates are converted offline. The plugin goes online only when you as
 - **A map click** loads the Mapterhorn terrain tile of the point (tiles.mapterhorn.com), which says roughly where
   you clicked.
 - **The map window** loads Leaflet 1.9.4 from unpkg.com, pinned by its SRI hash. It loads map tiles of the area
-  shown from wmts.geo.admin.ch (swisstopo) and sgx.geodatenzentrum.de (BKG). Its search box goes through the
-  plugin, like the command line's.
+  shown from wmts.geo.admin.ch (swisstopo), sgx.geodatenzentrum.de (BKG) and, in the USA,
+  basemap.nationalmap.gov and imagery.nationalmap.gov (USGS; the latter gets the view's map extent for the NAIP
+  image). Its search box goes through the plugin, like the command line's.
 
-The map data are © swisstopo and © BKG (dl-de/by-2-0), as credited in the map window. Places outside Switzerland
+The map data are © swisstopo and © BKG (dl-de/by-2-0), as credited in the map window; the USGS aerial images are
+public domain (USGS The National Map). Places outside Switzerland
 come from OpenStreetMap, © OpenStreetMap contributors (ODbL). Terrain heights after a map click: © Mapterhorn and
 its sources.
