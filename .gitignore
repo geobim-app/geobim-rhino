@@ -3,4 +3,5 @@ obj/
 *.user
 .vs/
 tests/out/
+examples/out/
 dist/
